@@ -1,36 +1,102 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎓 PyLearn - Professor de Programação com IA
 
-## Getting Started
+Uma aplicação web avançada que combina **Google Gemini AI** com interface híbrida de **chat + editor de código**, funcionando como um professor personalizado de programação que cria planos de estudo, ensina passo a passo e acompanha seu progresso.
 
-First, run the development server:
+## ✨ **Funcionalidades Completas Implementadas**
 
+### � **Ensino Inteligente Estruturado**
+- ✅ **Avaliação Automática**: IA avalia nível através de perguntas contextuais
+- ✅ **Planos Personalizados**: IA cria planos detalhados com módulos e lições
+- ✅ **Ensino Sequencial**: IA ensina seguindo plano estruturado passo a passo
+- ✅ **Feedback Inteligente**: IA analisa código e dá feedback construtivo
+- ✅ **Progresso Automático**: Sistema avança automaticamente conforme progresso
+
+### 🎯 **Interface Híbrida (ChatGPT + VS Code)**
+- ✅ **Chat Contextual**: IA conhece seu progresso e lição atual sempre
+- ✅ **Editor Profissional**: Monaco Editor com syntax highlighting completo
+- ✅ **Sincronização**: Chat e editor trabalham juntos simultaneamente
+- ✅ **Execução**: Simula execução de código e mostra resultados
+- ✅ **Responsivo**: Interface adaptável para desktop e mobile
+
+### � **Sistema Completo de Progresso**
+- ✅ **Plano Visual**: Interface mostra módulos, lições e objetivos
+- ✅ **Tracking Real**: Progresso salvo automaticamente no banco
+- ✅ **Continuidade**: IA sempre sabe onde você parou
+- ✅ **Conquistas**: Sistema de marcos e milestones motivacionais
+
+## 🛠️ Tecnologias Utilizadas
+
+### Frontend
+- **Next.js 14** - Framework React com App Router
+- **TypeScript** - Tipagem estática para JavaScript
+- **Tailwind CSS** - Framework CSS utilitário
+- **Monaco Editor** - Editor de código profissional
+- **Lucide React** - Ícones modernos
+
+### Backend
+- **Next.js API Routes** - Backend integrado
+- **Prisma ORM** - Object-Relational Mapping
+- **PostgreSQL** - Banco de dados relacional
+- **JWT** - Autenticação baseada em tokens
+
+### IA e Integração
+- **Google Gemini AI** - Modelo de linguagem para ensino
+- **bcryptjs** - Criptografia de senhas
+
+## 📋 Pré-requisitos
+
+- Node.js 18+ 
+- PostgreSQL 14+
+- Chave da API do Google Gemini AI
+- npm ou yarn
+
+## 🚀 Instalação e Configuração
+
+### 1. Instale as dependências
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Configure as variáveis de ambiente
+O arquivo `.env` já está configurado com as credenciais necessárias.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Configure o banco de dados
+```bash
+# Gerar o cliente Prisma
+npx prisma generate
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Aplicar as migrações
+npx prisma db push
 
-## Learn More
+# (Opcional) Visualizar o banco de dados
+npx prisma studio
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 4. Execute a aplicação
+```bash
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+A aplicação estará disponível em `http://localhost:3000`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Como Usar
 
-## Deploy on Vercel
+1. **Registro**: Crie uma conta na página inicial
+2. **Avaliação**: Responda às perguntas para que a IA determine seu nível
+3. **Aprendizado**: Use o chat para tirar dúvidas e o editor para praticar
+4. **Exercícios**: Gere exercícios personalizados e receba feedback instantâneo
+5. **Progresso**: Acompanhe sua evolução através do sistema
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🎯 Funcionalidades Implementadas
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- ✅ Sistema de autenticação completo
+- ✅ Avaliação de conhecimento com IA
+- ✅ Chat inteligente com professor IA
+- ✅ Editor de código integrado (Monaco Editor)
+- ✅ Geração de exercícios personalizados
+- ✅ Feedback automático de código
+- ✅ Interface responsiva e moderna
+- ✅ Banco de dados PostgreSQL com Prisma
+- ✅ Sistema de perfis de aprendizado
+
+Desenvolvido com ❤️ e IA para revolucionar o ensino de programação.

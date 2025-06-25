@@ -1,103 +1,219 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { Code, Zap, Target, ChevronRight, Sparkles } from 'lucide-react'
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const router = useRouter()
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      setIsLoggedIn(true)
+      router.push('/dashboard')
+    }
+  }, [router])
+
+  return (
+    <div className="min-h-screen bg-black">
+      {/* Header */}
+      <header className="border-b border-neutral-800 bg-black backdrop-blur-sm">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <div className="w-10 h-10 bg-brand-primary/15 rounded-xl flex items-center justify-center">
+                <Code className="w-6 h-6 text-brand-primary" />
+              </div>
+              <span className="text-2xl font-bold text-white tracking-tight">PyLearn</span>
+            </div>
+            <nav className="hidden md:flex items-center space-x-6">
+              <Link 
+                href="/help" 
+                className="text-neutral-400 hover:text-white transition-colors"
+              >
+                Como Funciona
+              </Link>
+              <Link 
+                href="/auth/login" 
+                className="px-4 py-2 bg-neutral-900 border border-neutral-700 hover:border-neutral-600 text-white rounded-lg transition-colors"
+              >
+                Login
+              </Link>
+              <Link 
+                href="/auth/register" 
+                className="px-4 py-2 bg-brand-primary hover:bg-brand-primary-dark text-white rounded-lg transition-colors shadow-lg shadow-brand-primary/10"
+              >
+                Começar
+              </Link>
+            </nav>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+      </header>
+
+      {/* Hero Section */}
+      <section className="container mx-auto px-6 py-20">
+        <div className="text-center max-w-4xl mx-auto">
+          <div className="flex items-center justify-center mb-6">
+            <Sparkles className="w-6 h-6 text-brand-accent mr-2" />
+            <span className="text-brand-accent font-medium">AI-Powered Learning</span>
+          </div>
+          
+          <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 leading-tight tracking-tight">
+            Aprenda programação com
+            <span className="block text-brand-primary">Inteligência Artificial</span>
+          </h1>
+          
+          <p className="text-xl text-neutral-400 mb-12 max-w-2xl mx-auto leading-relaxed">
+            Seu professor pessoal de programação. Aprenda no seu ritmo com feedback em tempo real 
+            e exercícios personalizados para o seu nível.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+            <Link
+              href="/auth/register"
+              className="px-8 py-3 bg-brand-primary hover:bg-brand-primary-dark text-white rounded-lg transition-colors text-lg flex items-center gap-2 shadow-lg shadow-brand-primary/20"
+            >
+              Começar Gratuitamente
+              <ChevronRight className="w-5 h-5" />
+            </Link>
+            <Link
+              href="/help"
+              className="px-8 py-3 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-white rounded-lg transition-colors text-lg"
+            >
+              Ver Demonstração
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Grid */}
+      <section className="container mx-auto px-6 py-20">
+        <div className="text-center mb-16">
+          <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">
+            Por que escolher PyLearn?
+          </h2>
+          <p className="text-neutral-400 text-lg max-w-2xl mx-auto">
+            Uma abordagem revolucionária para aprender programação
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+          <div className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 hover:border-neutral-700 shadow-lg group transition-all duration-300">
+            <div className="w-12 h-12 bg-brand-primary/15 rounded-xl flex items-center justify-center mb-6 group-hover:bg-brand-primary/20 transition-colors">
+              <Zap className="w-6 h-6 text-brand-primary" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-3">IA Personalizada</h3>
+            <p className="text-neutral-400 leading-relaxed">
+              Nossa IA adapta o ensino ao seu nível de conhecimento e ritmo de aprendizagem, 
+              criando uma experiência única para cada estudante.
+            </p>
+          </div>
+          
+          <div className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 hover:border-neutral-700 shadow-lg group transition-all duration-300">
+            <div className="w-12 h-12 bg-brand-primary/15 rounded-xl flex items-center justify-center mb-6 group-hover:bg-brand-primary/20 transition-colors">
+              <Code className="w-6 h-6 text-brand-primary" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-3">Editor Profissional</h3>
+            <p className="text-neutral-400 leading-relaxed">
+              Pratique com um editor de código profissional integrado, com syntax highlighting 
+              e feedback instantâneo sobre seu código.
+            </p>
+          </div>
+          
+          <div className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 hover:border-neutral-700 shadow-lg group transition-all duration-300">
+            <div className="w-12 h-12 bg-brand-primary/15 rounded-xl flex items-center justify-center mb-6 group-hover:bg-brand-primary/20 transition-colors">
+              <Target className="w-6 h-6 text-brand-primary" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-3">Planos Personalizados</h3>
+            <p className="text-neutral-400 leading-relaxed">
+              Planos de estudo criados especificamente para seus objetivos e disponibilidade, 
+              garantindo progresso constante.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Supported Languages */}
+      <section className="container mx-auto px-6 py-20">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">
+            Linguagens Suportadas
+          </h2>
+          <p className="text-neutral-400 text-lg">
+            Aprenda as linguagens mais demandadas do mercado
+          </p>
+        </div>
+        
+        <div className="flex flex-wrap justify-center gap-4 max-w-4xl mx-auto">
+          {['Python', 'JavaScript', 'TypeScript', 'Java', 'C++', 'C#', 'Go', 'Rust'].map((lang) => (
+            <span
+              key={lang}
+              className="bg-neutral-900 text-white px-6 py-3 rounded-full border border-neutral-800 hover:border-brand-primary/50 hover:bg-neutral-800 transition-all duration-200"
+            >
+              {lang}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="bg-neutral-900 border-t border-neutral-800">
+        <div className="container mx-auto px-6 py-20">
+          <div className="text-center max-w-3xl mx-auto">
+            <h2 className="text-3xl font-bold text-white mb-6 tracking-tight">
+              Pronto para começar sua jornada?
+            </h2>
+            <p className="text-neutral-400 text-lg mb-8">
+              Junte-se a milhares de estudantes que já estão aprendendo programação de forma inteligente.
+            </p>
+            <Link
+              href="/auth/register"
+              className="px-8 py-3 bg-brand-primary hover:bg-brand-primary-dark text-white rounded-lg transition-colors text-lg inline-flex items-center gap-2 shadow-lg shadow-brand-primary/20"
+            >
+              Começar Agora
+              <ChevronRight className="w-5 h-5" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-black border-t border-neutral-800 pb-12">
+        <div className="container mx-auto px-6 py-8">
+          <div className="flex flex-col md:flex-row justify-between items-center">
+            <div className="flex items-center space-x-2 mb-4 md:mb-0">
+              <div className="w-8 h-8 bg-brand-primary/15 rounded-lg flex items-center justify-center">
+                <Code className="w-4 h-4 text-brand-primary" />
+              </div>
+              <span className="text-lg font-semibold text-white tracking-tight">PyLearn</span>
+            </div>
+            <p className="text-neutral-500 text-sm">
+              © 2025 PyLearn. Todos os direitos reservados.
+            </p>
+          </div>
+        </div>
       </footer>
+      
+      {/* Status Bar (Fixed) */}
+      <div className="fixed bottom-0 left-0 right-0 h-6 bg-neutral-900 border-t border-neutral-800 text-neutral-500 px-4 flex items-center justify-between text-xs z-50 font-mono">
+        <div className="flex items-center">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+            <span className="hidden md:inline">Pronto</span>
+          </div>
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="hidden md:flex items-center space-x-2">
+            <span>PyLearn v1.0.0</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span>Gemini AI</span>
+          </div>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
