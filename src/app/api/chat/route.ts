@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { aiTeacher } from '@/lib/ai-teacher'
+import { getUserCurrentContext } from '@/lib/lesson-progress'
 import jwt from 'jsonwebtoken'
 
 // Middleware to verify JWT token
@@ -28,11 +29,18 @@ export async function POST(request: NextRequest) {
     const userId = getUserFromToken(request)
     const { message, sessionId, language, level, currentTopic, codeContext } = await request.json()
 
-    // Get user's current learning profile for context
-    const learningProfile = await prisma.learningProfile.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }
-    })
+    // Get user's current learning profile and fresh context
+    console.log('🔍 [CHAT-API] Getting fresh context from database...')
+    const userContext = await getUserCurrentContext(userId)
+    
+    if (!userContext) {
+      return NextResponse.json({
+        error: 'Perfil de aprendizado não encontrado',
+        type: 'profile_not_found'
+      }, { status: 404 })
+    }
+
+    const { profile, progress, context, studyPlan } = userContext
 
     // Get or create chat session
     let session
@@ -68,9 +76,6 @@ export async function POST(request: NextRequest) {
     })
 
     // Prepare enhanced context with conversation history
-    const studyPlan = learningProfile?.studyPlan as any
-    const currentProgress = learningProfile?.currentProgress as any
-    
     const recentMessages = await prisma.chatMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: 'desc' },
@@ -83,15 +88,15 @@ export async function POST(request: NextRequest) {
     }))
 
     const contextWithPlan = {
-      language: language || learningProfile?.language || 'Python',
-      level: level || learningProfile?.knowledgeLevel || 'beginner',
-      currentTopic,
+      language: language || profile.language || 'Python',
+      level: level || profile.knowledgeLevel || 'beginner',
+      currentTopic: currentTopic || context.lessonName,
       codeContext,
       studyPlan,
-      currentModule: currentProgress?.currentModule,
-      currentLesson: currentProgress?.currentLesson,
-      userUnderstanding: currentProgress?.userUnderstanding,
-      lessonCompleted: currentProgress?.lessonCompleted,
+      currentModule: progress.currentModule,
+      currentLesson: progress.currentLesson,
+      userUnderstanding: progress.userUnderstanding,
+      lessonCompleted: progress.lessonCompleted,
       conversationHistory
     }
 

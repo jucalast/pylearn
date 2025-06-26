@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { aiTeacher } from '@/lib/ai-teacher'
 import { prisma } from '@/lib/db'
+import { getUserCurrentContext } from '@/lib/lesson-progress'
 import jwt from 'jsonwebtoken'
 
 // Middleware to verify JWT token
@@ -29,97 +30,119 @@ function getUserFromToken(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('[Proactive Teaching API] Starting request')
+    console.log('🚀 [PROACTIVE-API] Starting request')
     
     let userId: string
     try {
       userId = getUserFromToken(request)
-      console.log('[Proactive Teaching API] User ID:', userId)
+      console.log('👤 [PROACTIVE-API] User ID:', userId)
     } catch (authError) {
-      console.error('[Proactive Teaching API] Auth error:', authError)
+      console.error('❌ [PROACTIVE-API] Auth error:', authError)
       return NextResponse.json({ error: 'Token inválido ou ausente' }, { status: 401 })
     }
 
     const body = await request.json()
     const { action, userCode, previousCode } = body
     
-    console.log('[Proactive Teaching] Action:', action)
+    console.log('🎯 [PROACTIVE-API] Action:', action)
 
-    // Buscar perfil do usuário
-    console.log('[Proactive Teaching API] Searching for user profile:', userId)
-    const learningProfile = await prisma.learningProfile.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }
-    })
-    console.log('[Proactive Teaching API] Found profile:', learningProfile ? 'Yes' : 'No')
-
-    if (!learningProfile) {
-      console.log('[Proactive Teaching API] No learning profile found for user:', userId)
+    // Buscar contexto completo e atualizado do banco
+    console.log('🔍 [PROACTIVE-API] Getting fresh context from database...')
+    const userContext = await getUserCurrentContext(userId)
+    
+    if (!userContext) {
+      console.error('❌ [PROACTIVE-API] No valid context found for user')
       return NextResponse.json({ 
-        error: 'Perfil de aprendizado não encontrado. Complete seu onboarding primeiro.',
+        error: 'Perfil de aprendizado não encontrado ou inválido',
         type: 'profile_not_found'
       }, { status: 404 })
     }
 
-    const progress = learningProfile.currentProgress as any
-    const studyPlan = learningProfile.studyPlan as any
+    const { profile, progress, context, studyPlan } = userContext
+    
+    console.log('✅ [PROACTIVE-API] Context loaded:', {
+      module: progress.currentModule,
+      lesson: progress.currentLesson,
+      progress: `${progress.progressPercentage}% (${progress.totalCompletedLessons}/${progress.totalLessons})`,
+      lesson_name: context.lessonName
+    })
 
     switch (action) {
       case 'start_lesson':
         try {
-          // Iniciar lição proativa
-          const lessonStart = await aiTeacher.startProactiveLesson(
+          console.log('🎓 [START-LESSON] Initializing lesson:', context.lessonName)
+          
+          // Usar contexto da lição atual
+          const fullLessonContext = {
+            currentModule: progress.currentModule,
+            currentLesson: progress.currentLesson,
+            moduleName: context.moduleName,
+            lessonName: context.lessonName,
+            lessonContent: context.lessonContent,
+            exercise: context.exercise,
+            objectives: context.objectives,
+            difficulty: context.difficulty,
+            progressPercentage: progress.progressPercentage,
+            totalLessons: progress.totalLessons,
+            completedLessons: progress.totalCompletedLessons,
+            xpEarned: progress.xpEarned,
+            previousLessons: context.previousLessons,
+            nextLessons: context.nextLessons,
+            userLanguage: profile.language,
+            userLevel: profile.knowledgeLevel
+          }
+
+          console.log('📋 [START-LESSON] Full context:', {
+            moduleName: fullLessonContext.moduleName,
+            lessonName: fullLessonContext.lessonName,
+            objectives: fullLessonContext.objectives?.length || 0,
+            hasExercise: !!fullLessonContext.exercise?.description
+          })
+
+          // Gerar mensagem proativa da IA com contexto completo
+          const aiResponse = await aiTeacher.startProactiveLesson(
             studyPlan,
-            progress.currentModule || 1,
-            progress.currentLesson || 1,
-            userCode
+            progress.currentModule,
+            progress.currentLesson,
+            userCode,
+            {
+              completedLessons: progress.completedLessons || [],
+              totalCompletedLessons: progress.totalCompletedLessons,
+              progressPercentage: progress.progressPercentage,
+              mistakeCount: 0,
+              helpRequests: 0
+            }
           )
+
+          console.log('✅ [START-LESSON] AI response generated successfully')
 
           return NextResponse.json({
             success: true,
             type: 'lesson_start',
-            data: lessonStart
+            data: {
+              chatMessage: aiResponse.chatMessage,
+              codeToSet: aiResponse.codeToSet,
+              lessonContext: fullLessonContext
+            }
           })
-        } catch (aiError) {
-          console.error('AI service error in start_lesson:', aiError)
-          const errorMessage = aiError instanceof Error ? aiError.message : String(aiError)
-          
-          // Handle specific API key errors
-          if (errorMessage.includes('API key not valid') || errorMessage.includes('API_KEY_INVALID')) {
-            return NextResponse.json({
-              error: 'O serviço de IA não está configurado corretamente. Entre em contato com o administrador do sistema.',
-              type: 'invalid_api_key'
-            }, { status: 500 })
-          } else if (errorMessage.includes('quota') || errorMessage.includes('limit') || errorMessage.includes('QUOTA_EXCEEDED')) {
-            return NextResponse.json({
-              error: 'O limite diário do serviço de IA foi atingido. Tente novamente mais tarde.',
-              type: 'quota_exceeded'
-            }, { status: 429 })
-          } else if (errorMessage.includes('503') || errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
-            return NextResponse.json({
-              error: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.',
-              type: 'service_unavailable'
-            }, { status: 503 })
-          } else {
-            return NextResponse.json({
-              error: 'Erro no processamento da IA: ' + errorMessage,
-              type: 'api_error'
-            }, { status: 500 })
-          }
+
+        } catch (error: any) {
+          console.error('❌ [START-LESSON] AI Error:', error)
+          throw error
         }
 
       case 'monitor_code':
         try {
-          // Monitorar código em tempo real
           if (!userCode) {
-            return NextResponse.json({ error: 'User code required for monitoring' }, { status: 400 })
+            return NextResponse.json({ success: false, error: 'Código não fornecido' })
           }
 
+          // Monitorar mudanças no código com contexto completo
           const currentLesson = {
-            name: studyPlan?.modules?.[progress.currentModule - 1]?.lessons?.[progress.currentLesson - 1]?.name || 'Lição Atual',
-            objectives: studyPlan?.modules?.[progress.currentModule - 1]?.lessons?.[progress.currentLesson - 1]?.objectives || [],
-            language: learningProfile.language,
-            level: learningProfile.knowledgeLevel,
+            name: context.lessonName,
+            objectives: context.objectives || [],
+            language: profile.language,
+            level: profile.knowledgeLevel,
             moduleNumber: progress.currentModule,
             lessonNumber: progress.currentLesson
           }
@@ -135,150 +158,93 @@ export async function POST(request: NextRequest) {
             type: 'code_monitoring',
             data: monitoring
           })
-        } catch (aiError) {
-          console.error('AI service error in monitor_code:', aiError)
-          const errorMessage = aiError instanceof Error ? aiError.message : String(aiError)
-          
-          // Handle specific API key errors
-          if (errorMessage.includes('API key not valid') || errorMessage.includes('API_KEY_INVALID')) {
-            return NextResponse.json({
-              error: 'O serviço de IA não está configurado corretamente. Entre em contato com o administrador do sistema.',
-              type: 'invalid_api_key'
-            }, { status: 500 })
-          } else if (errorMessage.includes('quota') || errorMessage.includes('limit') || errorMessage.includes('QUOTA_EXCEEDED')) {
-            return NextResponse.json({
-              error: 'O limite diário do serviço de IA foi atingido. Tente novamente mais tarde.',
-              type: 'quota_exceeded'
-            }, { status: 429 })
-          } else if (errorMessage.includes('503') || errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
-            return NextResponse.json({
-              error: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.',
-              type: 'service_unavailable'
-            }, { status: 503 })
-          } else {
-            return NextResponse.json({
-              error: 'Erro no processamento da IA: ' + errorMessage,
-              type: 'api_error'
-            }, { status: 500 })
-          }
+
+        } catch (error: any) {
+          console.error('❌ [MONITOR-CODE] AI Error:', error)
+          throw error
         }
 
       case 'get_next_exercise':
         try {
-          // Gerar próximo exercício automaticamente
-          const nextExercise = await aiTeacher.generateExercise(
-            studyPlan?.modules?.[progress.currentModule - 1]?.name || 'Conceitos Básicos',
-            learningProfile.knowledgeLevel,
-            learningProfile.language
+          // Gerar novo exercício com contexto da lição
+          const exercise = await aiTeacher.generateExercise(
+            context.lessonName || 'Conceitos Básicos',
+            context.difficulty || profile.knowledgeLevel,
+            profile.language
           )
 
           return NextResponse.json({
             success: true,
             type: 'next_exercise',
-            data: {
-              exercise: nextExercise,
-              lessonState: 'exercise'
-            }
+            data: { exercise }
           })
-        } catch (aiError) {
-          console.error('AI service error in get_next_exercise:', aiError)
-          const errorMessage = aiError instanceof Error ? aiError.message : String(aiError)
-          
-          // Handle specific API key errors
-          if (errorMessage.includes('API key not valid') || errorMessage.includes('API_KEY_INVALID')) {
-            return NextResponse.json({
-              error: 'O serviço de IA não está configurado corretamente. Entre em contato com o administrador do sistema.',
-              type: 'invalid_api_key'
-            }, { status: 500 })
-          } else if (errorMessage.includes('quota') || errorMessage.includes('limit') || errorMessage.includes('QUOTA_EXCEEDED')) {
-            return NextResponse.json({
-              error: 'O limite diário do serviço de IA foi atingido. Tente novamente mais tarde.',
-              type: 'quota_exceeded'
-            }, { status: 429 })
-          } else if (errorMessage.includes('503') || errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
-            return NextResponse.json({
-              error: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.',
-              type: 'service_unavailable'
-            }, { status: 503 })
-          } else {
-            return NextResponse.json({
-              error: 'Erro no processamento da IA: ' + errorMessage,
-              type: 'api_error'
-            }, { status: 500 })
-          }
+
+        } catch (error: any) {
+          console.error('❌ [GET-EXERCISE] AI Error:', error)
+          throw error
         }
 
-      case 'evaluate_understanding':
+      case 'adaptive_feedback':
         try {
-          // Avaliar compreensão do usuário
-          const concepts = studyPlan?.modules?.[progress.currentModule - 1]?.lessons?.[progress.currentLesson - 1]?.objectives || ['conceitos básicos']
-          
-          const understanding = await aiTeacher.assessUnderstanding(
-            userCode || 'Código em desenvolvimento',
-            concepts
-          )
+          // Feedback adaptativo com base no progresso
+          const feedbackContext = {
+            currentModule: progress.currentModule,
+            currentLesson: progress.currentLesson,
+            lessonName: context.lessonName,
+            progressPercentage: progress.progressPercentage,
+            userLevel: profile.knowledgeLevel,
+            userLanguage: profile.language,
+            userCode: userCode || 'Código em desenvolvimento',
+            recentActivity: 'coding'
+          }
 
-          // Atualizar progresso no banco
+          // Atualizar última atividade no banco - usando updatedAt que existe
           await prisma.learningProfile.update({
-            where: { id: learningProfile.id },
-            data: {
-              currentProgress: {
-                ...progress,
-                lastUnderstanding: understanding,
-                lastActivity: new Date().toISOString()
-              }
+            where: { id: profile.id },
+            data: { 
+              updatedAt: new Date()
             }
           })
+
+          // Usar provideFeedback que existe
+          const feedback = await aiTeacher.provideFeedback(
+            userCode || 'Código em desenvolvimento',
+            context.exercise?.description || 'Exercício atual',
+            profile.language
+          )
 
           return NextResponse.json({
             success: true,
-            type: 'understanding_evaluation',
-            data: {
-              understanding,
-              shouldAdvance: understanding === 'good' || understanding === 'excellent',
-              feedback: understanding === 'excellent' ? 'Excelente compreensão! Pronto para avançar.' :
-                       understanding === 'good' ? 'Boa compreensão! Continue praticando.' :
-                       understanding === 'fair' ? 'Compreensão básica. Pratique mais um pouco.' :
-                       'Precisa de mais prática. Não desista!'
-            }
+            type: 'adaptive_feedback',
+            data: feedback
           })
-        } catch (aiError) {
-          console.error('AI service error in evaluate_understanding:', aiError)
-          const errorMessage = aiError instanceof Error ? aiError.message : String(aiError)
-          
-          // Handle specific API key errors
-          if (errorMessage.includes('API key not valid') || errorMessage.includes('API_KEY_INVALID')) {
-            return NextResponse.json({
-              error: 'O serviço de IA não está configurado corretamente. Entre em contato com o administrador do sistema.',
-              type: 'invalid_api_key'
-            }, { status: 500 })
-          } else if (errorMessage.includes('quota') || errorMessage.includes('limit') || errorMessage.includes('QUOTA_EXCEEDED')) {
-            return NextResponse.json({
-              error: 'O limite diário do serviço de IA foi atingido. Tente novamente mais tarde.',
-              type: 'quota_exceeded'
-            }, { status: 429 })
-          } else if (errorMessage.includes('503') || errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
-            return NextResponse.json({
-              error: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.',
-              type: 'service_unavailable'
-            }, { status: 503 })
-          } else {
-            return NextResponse.json({
-              error: 'Erro no processamento da IA: ' + errorMessage,
-              type: 'api_error'
-            }, { status: 500 })
-          }
+
+        } catch (error: any) {
+          console.error('❌ [ADAPTIVE-FEEDBACK] AI Error:', error)
+          throw error
         }
 
       default:
-        return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
+        return NextResponse.json({ 
+          error: 'Ação não reconhecida',
+          type: 'invalid_action'
+        }, { status: 400 })
     }
 
   } catch (error) {
-    console.error('[Proactive Teaching API] Error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    console.error('❌ [PROACTIVE-API] Unexpected error:', error)
+    
+    // Propagar erros da API Gemini diretamente
+    if (error instanceof Error) {
+      return NextResponse.json({ 
+        error: error.message,
+        type: 'api_error'
+      }, { status: 500 })
+    }
+
+    return NextResponse.json({ 
+      error: 'Erro interno do servidor',
+      type: 'server_error'
+    }, { status: 500 })
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { aiTeacher } from '@/lib/ai-teacher'
+import { getUserCurrentContext, updateUserProgress } from '@/lib/lesson-progress'
 import jwt from 'jsonwebtoken'
 
 function getUserFromToken(request: NextRequest) {
@@ -88,40 +89,11 @@ export async function POST(request: NextRequest) {
     console.error('Learning profile creation error:', error)
     console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace')
     
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    
-    // Detectar tipos específicos de erro da API Gemini
-    if (errorMessage.includes('API key not valid') || errorMessage.includes('API_KEY_INVALID')) {
-      return NextResponse.json({
-        error: 'A chave da API do Google Gemini AI é inválida. Por favor, configure uma chave válida.',
-        type: 'api_key_invalid'
-      }, { status: 401 })
-    }
-    
-    if (errorMessage.includes('quota') || errorMessage.includes('limit') || errorMessage.includes('429')) {
-      return NextResponse.json({
-        error: 'Cota da API Google Gemini AI esgotada. Tente novamente mais tarde.',
-        type: 'quota_exceeded'
-      }, { status: 429 })
-    }
-    
-    if (errorMessage.includes('503') || errorMessage.includes('Service Unavailable') || errorMessage.includes('overloaded')) {
-      return NextResponse.json({
-        error: 'O serviço Google Gemini AI está temporariamente indisponível. Tente novamente em alguns minutos.',
-        type: 'service_unavailable'
-      }, { status: 503 })
-    }
-      if (errorMessage.includes('GoogleGenerativeAI') || errorMessage.includes('generativelanguage.googleapis.com')) {
-      return NextResponse.json({
-        error: 'Erro na comunicação com o serviço Google Gemini AI. Verifique sua conexão de internet e tente novamente.',
-        type: 'api_error'
-      }, { status: 502 })
-    }
-    
-    // Default error for any other cases
+    // Retornar erro original sem modificação
     return NextResponse.json({
-      error: 'A IA está gerando uma resposta muito extensa. Isso pode acontecer ocasionalmente. Tente novamente - geralmente funciona na segunda tentativa.',
-      type: 'internal_error'
+      error: error instanceof Error ? error.message : String(error),
+      type: 'raw_error',
+      fullError: error
     }, { status: 500 })
   }
 }
@@ -129,22 +101,54 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const userId = getUserFromToken(request)
-    const { searchParams } = new URL(request.url)
-    const language = searchParams.get('language')
-
-    let whereClause: any = { userId }
-    if (language) {
-      whereClause.language = language
-    }
-
+    // Buscar todos os perfis de linguagem do usuário
     const profiles = await prisma.learningProfile.findMany({
-      where: whereClause,
-      orderBy: { updatedAt: 'desc' }
+      where: { userId },
+      orderBy: { createdAt: 'asc' }
     })
 
-    return NextResponse.json({ profiles })
+    if (!profiles || profiles.length === 0) {
+      return NextResponse.json({ profiles: [] })
+    }
+
+    // Montar progresso detalhado para cada perfil
+    const result = await Promise.all(profiles.map(async (profile) => {
+      const studyPlan = profile.studyPlan as any
+      const currentProgress = profile.currentProgress as any
+      // Calcular progresso correto
+      const progressCalc = studyPlan && currentProgress
+        ? require('@/lib/lesson-progress').calculateCorrectProgress(
+            studyPlan,
+            currentProgress.currentModule || 1,
+            currentProgress.currentLesson || 1,
+            currentProgress.completedLessons || []
+          )
+        : {
+            totalLessons: 0,
+            totalCompletedLessons: 0,
+            progressPercentage: 0,
+            currentPosition: '0 de 0',
+            moduleProgress: []
+          }
+
+      return {
+        id: profile.id,
+        language: profile.language,
+        knowledgeLevel: profile.knowledgeLevel,
+        studyPlan,
+        currentProgress: {
+          ...currentProgress,
+          ...progressCalc
+        },
+        preferences: profile.preferences,
+        createdAt: profile.createdAt,
+        updatedAt: profile.updatedAt
+      }
+    }))
+
+    return NextResponse.json(result)
   } catch (error) {
-    console.error('Get learning profiles error:', error)
+    console.error('❌ [LEARNING-PROFILE-API] Error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -152,55 +156,107 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// DELETE: Remove uma linguagem do perfil do usuário
+export async function DELETE(request: NextRequest) {
+  try {
+    const userId = getUserFromToken(request)
+    const { language } = await request.json()
+    if (!language) {
+      return NextResponse.json({ error: 'Linguagem não especificada' }, { status: 400 })
+    }
+    const deleted = await prisma.learningProfile.deleteMany({
+      where: { userId, language }
+    })
+    return NextResponse.json({ deleted: deleted.count })
+  } catch (error) {
+    console.error('❌ [LEARNING-PROFILE-API] DELETE Error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
 export async function PUT(request: NextRequest) {
   try {
     const userId = getUserFromToken(request)
-    const { currentModule, currentLesson, completedLessons, completedModules } = await request.json()
+    const body = await request.json()
+    // Permitir atualização de qualquer campo relevante do progresso
+    const {
+      language,
+      currentModule,
+      currentLesson,
+      completedLessons,
+      completedModules,
+      xpEarned,
+      lastActivity,
+      lessonCompleted,
+      userUnderstanding
+    } = body
 
-    // Find existing learning profile
-    const existingProfile = await prisma.learningProfile.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }
-    })
-
-    if (!existingProfile) {
-      return NextResponse.json(
-        { error: 'Learning profile not found' },
-        { status: 404 }
-      )
+    if (!language) {
+      return NextResponse.json({ error: 'Linguagem não especificada' }, { status: 400 })
     }
 
-    // Calculate progress percentage
-    const studyPlan = existingProfile.studyPlan as any
-    const currentProgress = existingProfile.currentProgress as any
-    const totalLessons = studyPlan.modules?.reduce((total: number, module: any) => {
-      return total + (module.lessons?.length || 0)
-    }, 0) || 1
-
-    const completedCount = completedLessons?.length || 0
-    const progressPercentage = Math.round((completedCount / totalLessons) * 100)
-
-    // Update progress
-    const updatedProfile = await prisma.learningProfile.update({
-      where: { id: existingProfile.id },
-      data: {
-        currentProgress: {
-          currentModule: currentModule || currentProgress?.currentModule || 1,
-          currentLesson: currentLesson || currentProgress?.currentLesson || 1,
-          completedModules: completedModules || currentProgress?.completedModules || [],
-          completedLessons: completedLessons || currentProgress?.completedLessons || [],
-          totalProgress: progressPercentage,
-          lastUpdated: new Date().toISOString()
-        }
-      }
+    // Buscar perfil de linguagem
+    const profile = await prisma.learningProfile.findFirst({
+      where: { userId, language }
     })
+    if (!profile) {
+      return NextResponse.json({ error: 'Perfil não encontrado' }, { status: 404 })
+    }
+
+    // Atualizar progresso detalhado
+    const currentProgress = profile.currentProgress as any || {}
+    const updatedProgress = {
+      ...currentProgress,
+      ...(currentModule !== undefined ? { currentModule } : {}),
+      ...(currentLesson !== undefined ? { currentLesson } : {}),
+      ...(completedLessons !== undefined ? { completedLessons } : {}),
+      ...(completedModules !== undefined ? { completedModules } : {}),
+      ...(xpEarned !== undefined ? { xpEarned } : {}),
+      ...(lastActivity !== undefined ? { lastActivity } : { lastActivity: new Date().toISOString() }),
+      ...(lessonCompleted !== undefined ? { lessonCompleted } : {}),
+      ...(userUnderstanding !== undefined ? { userUnderstanding } : {})
+    }
+
+    await prisma.learningProfile.update({
+      where: { id: profile.id },
+      data: { currentProgress: updatedProgress, updatedAt: new Date() }
+    })
+
+    // Buscar contexto atualizado
+    const updatedProfile = await prisma.learningProfile.findUnique({ where: { id: profile.id } })
+    const studyPlan = updatedProfile?.studyPlan as any
+    const progressCalc = studyPlan && updatedProgress
+      ? require('@/lib/lesson-progress').calculateCorrectProgress(
+          studyPlan,
+          updatedProgress.currentModule || 1,
+          updatedProgress.currentLesson || 1,
+          updatedProgress.completedLessons || []
+        )
+      : {
+          totalLessons: 0,
+          totalCompletedLessons: 0,
+          progressPercentage: 0,
+          currentPosition: '0 de 0',
+          moduleProgress: []
+        }
 
     return NextResponse.json({
-      profile: updatedProfile,
-      progress: progressPercentage
+      id: updatedProfile?.id,
+      language: updatedProfile?.language,
+      knowledgeLevel: updatedProfile?.knowledgeLevel,
+      studyPlan,
+      currentProgress: {
+        ...updatedProgress,
+        ...progressCalc
+      },
+      preferences: updatedProfile?.preferences,
+      createdAt: updatedProfile?.createdAt,
+      updatedAt: updatedProfile?.updatedAt
     })
   } catch (error) {
-    console.error('Progress update error:', error)
+    console.error('❌ [LEARNING-PROFILE-UPDATE] Error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

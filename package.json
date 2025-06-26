@@ -13,6 +13,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "^6.10.1",
     "@radix-ui/react-dialog": "^1.1.14",
+    "@tailwindcss/typography": "^0.5.16",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "bcryptjs": "^3.0.2",
@@ -22,6 +23,8 @@
     "prisma": "^6.10.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
   },

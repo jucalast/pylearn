@@ -33,12 +33,12 @@ export class AITeacher {
 
   constructor() {
     this.model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash", // Mudança para modelo mais econômico
+      model: "gemini-1.5-pro", // Usar modelo com contexto longo
       generationConfig: {
         temperature: 0.7,
         topK: 40,
         topP: 0.8,
-        maxOutputTokens: 4096, // Reduzido para economizar tokens
+        maxOutputTokens: 8192, // Increased from 1024 to 8192 for longer responses
       }
     })
   }
@@ -685,8 +685,7 @@ INSTRUÇÕES:
     studyPlan: any, 
     currentModule: number, 
     currentLesson: number, 
-    userCode?: string,
-    userProgress?: any
+    userCode?: string
   ): Promise<{
     chatMessage: string;
     codeToSet: string;
@@ -694,12 +693,7 @@ INSTRUÇÕES:
     nextActions: string[];
   }> {
     try {
-      console.log('[AI Teacher] Starting proactive lesson with enhanced context:', { 
-        currentModule, 
-        currentLesson, 
-        hasUserCode: !!userCode,
-        userProgressProvided: !!userProgress 
-      })
+      console.log('Starting proactive lesson:', { currentModule, currentLesson })
 
       if (!studyPlan?.modules || !studyPlan.modules[currentModule - 1]) {
         throw new Error('Plano de estudos inválido ou módulo não encontrado')
@@ -712,94 +706,54 @@ INSTRUÇÕES:
         throw new Error('Lição não encontrada no plano de estudos')
       }
 
-      // Calcular lições completadas e contexto
-      const completedLessons = userProgress?.completedLessons || []
-      const totalCompletedLessons = userProgress?.totalCompletedLessons || 0
-      const progressPercentage = userProgress?.progressPercentage || 0
-
-      // Obter lições anteriores para contexto
-      const previousLessons: string[] = []
-      if (completedLessons && Array.isArray(completedLessons)) {
-        completedLessons.forEach((completed: any) => {
-          const module = studyPlan.modules?.[completed.module - 1]
-          const lesson = module?.lessons?.[completed.lesson - 1]
-          if (lesson?.name) {
-            previousLessons.push(lesson.name)
-          }
-        })
-      }
-
-      // Check if this is template code and ignore it for the first message
-      const isTemplateCode = userCode && (
-        userCode.trim() === '# Escreva seu código aqui\nprint("Olá, mundo!")' ||
-        userCode.trim() === '# Bem-vindo ao PyLearn!\n# Aguarde enquanto carregamos sua lição...' ||
-        userCode.includes('# Escreva seu código aqui') ||
-        userCode.includes('# Bem-vindo ao PyLearn!') ||
-        userCode.includes('Aguarde enquanto carregamos') ||
-        userCode.trim() === 'print("Olá, mundo!")'
-      )
-
-      // Contexto enriquecido para ensino proativo
+      // Contexto para ensino proativo
       const context: TeachingContext = {
         language: studyPlan.language || 'Python',
         level: studyPlan.level || 'beginner',
         currentModule,
         currentLesson,
-        currentTopic: lessonData.name,
-        lessonState: 'introduction',
+        lessonState: userCode ? 'exercise' : 'introduction',
         studyPlan,
-        codeContext: isTemplateCode ? undefined : userCode,
+        codeContext: userCode,
         userProgress: {
-          completedExercises: totalCompletedLessons,
-          totalExercises: studyPlan.modules?.reduce((total: number, module: any) => 
-            total + (module.lessons?.length || 0), 0) || 0,
-          mistakeCount: userProgress?.mistakeCount || 0,
-          helpRequests: userProgress?.helpRequests || 0
-        },
-        conversationHistory: []
+          completedExercises: 0,
+          totalExercises: lessonData.exercises?.length || 1,
+          mistakeCount: 0,
+          helpRequests: 0
+        }
       }
 
-      // Prompt melhorado para ensino proativo com contexto completo
-      const proactivePrompt = `Você é uma professora de programação PROATIVA e está iniciando uma nova lição.
+      // Prompt para ensino proativo
+      const proactivePrompt = `
+MISSÃO: Conduza uma aula PROATIVA sobre "${lessonData.name}"
 
-INFORMAÇÕES DO ALUNO:
-- Nome da lição: "${lessonData.name}"
-- Módulo: ${currentModule} (${moduleData.name})
-- Progresso geral: ${progressPercentage}% (${totalCompletedLessons} lições completadas)
-- Lições anteriores: ${previousLessons.length > 0 ? previousLessons.join(', ') : 'Nenhuma'}
-- Está na lição: ${currentLesson} de ${moduleData.lessons?.length || 0} do módulo atual
+CONTEÚDO DA LIÇÃO:
+${lessonData.content}
 
-CONTEÚDO DA LIÇÃO ATUAL:
-Título: ${lessonData.name}
-Objetivos: ${lessonData.objectives?.join(', ') || 'Conceitos básicos'}
-Exercício planejado: ${lessonData.exercise?.description || 'Prática básica'}
+OBJETIVOS DE APRENDIZAGEM:
+${lessonData.objectives?.join(', ') || 'Conceitos básicos'}
 
-CONTEXTO DO CÓDIGO:
-${isTemplateCode ? 'O editor contém apenas template inicial - ignore completamente' : 
-  userCode ? `Código do aluno: ${userCode}` : 'Editor vazio'}
+EXERCÍCIO PLANEJADO:
+${lessonData.exercise?.description || 'Prática básica'}
 
-INSTRUÇÕES DE ENSINO:
-1. **Cumprimente** o aluno de forma pessoal e acolhedora
-2. **Apresente** a lição considerando seu progresso anterior
-3. **Explique** POR QUE este conceito é importante para a programação
-4. **Demonstre** com um exemplo prático de código
-5. **Proponha** uma atividade específica para praticar
-6. **Oriente** exatamente o que o aluno deve fazer no editor
+CONTEXTO DO ALUNO:
+${userCode ? `Código atual: ${userCode}` : 'Iniciando lição'}
 
-FORMATO OBRIGATÓRIO:
-- Use **negrito** para destacar conceitos importantes
-- Use • para listas organizadas
-- Use blocos de código \`\`\`python para exemplos
-- Seja conversacional e encorajador
-- Foque no aprendizado prático
+INSTRUÇÕES ESPECÍFICAS:
+1. APRESENTE o conceito de forma clara e prática
+2. FORNEÇA um exemplo concreto de código
+3. PROPONHA um exercício específico para o aluno fazer
+4. EXPLIQUE exatamente o que o aluno deve digitar no editor
+5. CONDUZA a aula - não espere perguntas!
 
-IMPORTANTE:
-- NÃO mencione código template se o editor contém apenas template
-- SE há código real do aluno, comente especificamente sobre ele
-- Adapte a explicação ao nível de progresso atual
-- Sempre termine com próximos passos claros
+FORMATO DA RESPOSTA:
+- Explicação do conceito (breve e clara)
+- Exemplo prático com código
+- Exercício específico para praticar
+- Código inicial para o aluno começar
 
-Responda em português brasileiro de forma natural e PROATIVA.`
+SEJA PROATIVA - conduza a aula ativamente!
+`
 
       console.log('Generating proactive lesson content...')
       const result = await this.model.generateContent(

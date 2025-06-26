@@ -3,6 +3,9 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Editor from '@monaco-editor/react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { calculateCorrectProgress } from '@/lib/lesson-progress'
 import { 
   MessageCircle, 
   Code, 
@@ -44,7 +47,8 @@ export default function Dashboard() {
   const [user, setUser] = useState<any>(null)
   const [currentProfile, setCurrentProfile] = useState<any>(null)
   const [studyPlan, setStudyPlan] = useState<any>(null)
-  const [currentProgress, setCurrentProgress] = useState<any>(null)
+  const [lessonContext, setLessonContext] = useState<any>(null) // Estado unificado para contexto da lição
+  const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set()) // Estado para módulos expandidos
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [code, setCode] = useState('# Escreva seu código aqui\\nprint("Olá, mundo!")')
@@ -60,10 +64,14 @@ export default function Dashboard() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
+  // Função para gerar IDs únicos para mensagens
+  const generateUniqueId = useCallback(() => {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  }, [])
+
   useEffect(() => {
     const token = localStorage.getItem('token')
     const userData = localStorage.getItem('user')
-    const profileData = localStorage.getItem('currentProfile')
 
     if (!token || !userData) {
       router.push('/auth/login')
@@ -71,15 +79,51 @@ export default function Dashboard() {
     }
 
     setUser(JSON.parse(userData))
-    if (profileData) {
-      const profile = JSON.parse(profileData)
-      setCurrentProfile(profile)
-      setStudyPlan(profile.studyPlan)
-      setCurrentProgress(profile.currentProgress)
-    }
-
-    initializeWithCurrentLesson()
+    
+    // Buscar contexto atualizado da API ao invés de usar localStorage
+    fetchUpdatedProfile()
   }, [router])
+
+  const fetchUpdatedProfile = async () => {
+    const token = localStorage.getItem('token')
+    
+    try {
+      const response = await fetch('/api/learning-profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        
+        if (data.currentContext) {
+          // Usar contexto atualizado da API
+          const { profile, progress, context, studyPlan } = data.currentContext
+          setCurrentProfile(profile)
+          setStudyPlan(studyPlan)
+          setLessonContext({
+            ...context,
+            progressPercentage: progress.progressPercentage,
+            totalLessons: progress.totalLessons,
+            completedLessons: progress.totalCompletedLessons,
+            xpEarned: progress.xpEarned
+          })
+        } else if (data.profiles?.length > 0) {
+          // Fallback para formato antigo
+          const profile = data.profiles[0]
+          setCurrentProfile(profile)
+          setStudyPlan(profile.studyPlan)
+          setLessonContext(profile.currentProgress)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching updated profile:', error)
+    }
+    
+    // Inicializar lição após carregar dados
+    initializeWithCurrentLesson()
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -134,10 +178,46 @@ export default function Dashboard() {
     }
   }, [isResizing, resize, stopResize])
 
+  // Calcular progresso correto baseado no studyPlan atual
+  const correctProgress = useMemo(() => {
+    if (!currentProfile?.studyPlan) return null
+    
+    // Use lessonContext as primary source (more reliable), fallback to currentProfile
+    const currentModule = lessonContext?.currentModule || currentProfile.currentProgress?.currentModule || 1
+    const currentLesson = lessonContext?.currentLesson || currentProfile.currentProgress?.currentLesson || 1
+    const completedLessons = currentProfile.currentProgress?.completedLessons || []
+    
+    return calculateCorrectProgress(
+      currentProfile.studyPlan,
+      currentModule,
+      currentLesson,
+      completedLessons
+    )
+  }, [currentProfile, lessonContext])
+
   const initializeWithCurrentLesson = async () => {
     const token = localStorage.getItem('token')
     
     try {
+      // Primeiro, buscar o contexto mais recente do backend
+      const profileResponse = await fetch('/api/learning-profile', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (profileResponse.ok) {
+        const profileData = await profileResponse.json()
+        setLessonContext(profileData.context)
+        
+        // Atualizar perfil local
+        setCurrentProfile((prev: any) => prev ? {
+          ...prev,
+          currentProgress: profileData.context
+        } : null)
+      }
+
       // Usar nova API de ensino proativo
       const response = await fetch('/api/proactive-teaching', {
         method: 'POST',
@@ -157,6 +237,9 @@ export default function Dashboard() {
         if (result.success && result.type === 'lesson_start') {
           const data = result.data
           
+          // Armazenar contexto da lição
+          setLessonContext(data.lessonContext)
+          
           // Atualizar editor com código do exercício
           if (data.codeToSet) {
             setCode(data.codeToSet)
@@ -164,7 +247,7 @@ export default function Dashboard() {
 
           // Mensagem proativa da IA
           const proactiveMessage: Message = {
-            id: Date.now().toString(),
+            id: generateUniqueId(),
             role: 'assistant',
             content: data.chatMessage,
             timestamp: new Date()
@@ -187,7 +270,7 @@ export default function Dashboard() {
           errorData.type === 'profile_not_found'
         )) {
           const errorMessage: Message = {
-            id: Date.now().toString(),
+            id: generateUniqueId(),
             role: 'assistant',
             content: `❌ **Configuração Necessária:** Seu perfil de aprendizado não foi encontrado ou está inválido.\n\n🔧 **Solução:** Vou te redirecionar para completar sua configuração inicial.`,
             timestamp: new Date()
@@ -220,7 +303,7 @@ export default function Dashboard() {
           }
           
           const message: Message = {
-            id: Date.now().toString(),
+            id: generateUniqueId(),
             role: 'assistant',
             content: errorMessage,
             timestamp: new Date()
@@ -233,7 +316,7 @@ export default function Dashboard() {
       
       // Mostrar erro de rede ao usuário
       const errorMessage: Message = {
-        id: Date.now().toString(),
+        id: generateUniqueId(),
         role: 'assistant',
         content: '🌐 **Erro de Conexão**\n\nNão foi possível inicializar sua lição.\n\n🔧 **Possíveis causas:**\n• Conexão com a internet instável\n• Servidor temporariamente indisponível\n• API do Google Gemini sobrecarregada\n\n🔄 **Solução:** Aguarde alguns segundos e recarregue a página.',
         timestamp: new Date()
@@ -245,10 +328,8 @@ export default function Dashboard() {
   const sendMessage = async () => {
     if (!newMessage.trim() || loading) return
 
-    console.log('Sending message:', newMessage)
-
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: generateUniqueId(),
       role: 'user',
       content: newMessage,
       timestamp: new Date()
@@ -268,8 +349,6 @@ export default function Dashboard() {
         codeContext: code
       }
       
-      console.log('Request body:', requestBody)
-      
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -279,9 +358,7 @@ export default function Dashboard() {
         body: JSON.stringify(requestBody)
       })
 
-      console.log('Response status:', response.status)
       const data = await response.json()
-      console.log('Response data:', data)
 
       if (response.ok) {
         const aiMessage: Message = {
@@ -394,18 +471,215 @@ export default function Dashboard() {
           .replace(/\\\\/g, '\\')
           .replace(/\\"/g, '"')
           .trim()
-          
-        return content.split('\n').map((line, index) => (
-          <span key={index}>
-            {line}
-            {index < content.split('\n').length - 1 && <br />}
-          </span>
-        ))
+        
+        // Para mensagens da IA, renderizar como Markdown
+        if (message.role === 'assistant') {
+          return (
+            <div className="prose prose-sm prose-invert max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  // Parágrafos com espaçamento elegante
+                  p: ({children}) => (
+                    <p className="mb-4 last:mb-0 leading-relaxed text-neutral-100 text-sm">
+                      {children}
+                    </p>
+                  ),
+                  
+                  // Texto em destaque
+                  strong: ({children}) => (
+                    <strong className="font-semibold text-white bg-gradient-to-r from-white to-neutral-200 bg-clip-text">
+                      {children}
+                    </strong>
+                  ),
+                  
+                  // Texto em itálico
+                  em: ({children}) => (
+                    <em className="italic text-neutral-200 font-medium">
+                      {children}
+                    </em>
+                  ),
+                  
+                  // Listas não ordenadas
+                  ul: ({children}) => (
+                    <ul className="mb-4 space-y-2 text-neutral-100">
+                      {children}
+                    </ul>
+                  ),
+                  
+                  // Listas ordenadas
+                  ol: ({children}) => (
+                    <ol className="mb-4 space-y-2 text-neutral-100 list-decimal list-inside">
+                      {children}
+                    </ol>
+                  ),
+                  
+                  // Itens de lista com ícones customizados
+                  li: ({children}) => (
+                    <li className="flex items-start group">
+                      <span className="text-brand-primary mr-3 font-bold text-base group-hover:scale-110 transition-transform">
+                        ✨
+                      </span>
+                      <span className="flex-1 text-sm leading-relaxed">
+                        {children}
+                      </span>
+                    </li>
+                  ),
+                  
+                  // Títulos principais
+                  h1: ({children}) => (
+                    <h1 className="text-xl font-bold text-white mb-4 pb-2 border-b-2 border-gradient-to-r from-brand-primary to-transparent bg-gradient-to-r from-white to-neutral-300 bg-clip-text">
+                      {children}
+                    </h1>
+                  ),
+                  
+                  // Subtítulos
+                  h2: ({children}) => (
+                    <h2 className="text-lg font-semibold text-white mb-3 flex items-center">
+                      <span className="w-2 h-2 bg-brand-primary rounded-full mr-3"></span>
+                      {children}
+                    </h2>
+                  ),
+                  
+                  // Títulos menores
+                  h3: ({children}) => (
+                    <h3 className="text-base font-medium text-white mb-2 flex items-center">
+                      <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full mr-2"></span>
+                      {children}
+                    </h3>
+                  ),
+                  
+                  // Código inline e blocos
+                  code: ({node, className, children, ...props}) => {
+                    const isInline = !className
+                    
+                    if (isInline) {
+                      return (
+                        <code 
+                          className="px-2 py-1 bg-gradient-to-r from-neutral-800 to-neutral-900 text-brand-primary rounded-md text-sm font-mono border border-neutral-700 shadow-inner"
+                          {...props}
+                        >
+                          {children}
+                        </code>
+                      )
+                    } else {
+                      return (
+                        <code 
+                          className="block p-4 bg-gradient-to-br from-black to-neutral-950 rounded-xl text-green-400 font-mono text-sm border border-neutral-800 overflow-x-auto shadow-lg relative"
+                          {...props}
+                        >
+                          <div className="absolute top-2 right-2 flex space-x-1">
+                            <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                            <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          </div>
+                          <div className="pt-4">
+                            {children}
+                          </div>
+                        </code>
+                      )
+                    }
+                  },
+                  
+                  // Blocos de código com container
+                  pre: ({children}) => (
+                    <div className="mb-4 rounded-xl overflow-hidden border border-neutral-800 shadow-xl">
+                      <div className="bg-neutral-900 px-4 py-2 text-xs text-neutral-400 font-mono border-b border-neutral-800 flex items-center justify-between">
+                        <span>Python</span>
+                        <span className="text-green-400">⚡ Executável</span>
+                      </div>
+                      <pre className="p-0 m-0 bg-transparent overflow-x-auto">
+                        {children}
+                      </pre>
+                    </div>
+                  ),
+                  
+                  // Citações destacadas
+                  blockquote: ({children}) => (
+                    <blockquote className="border-l-4 border-gradient-to-b from-brand-primary to-blue-500 pl-4 py-2 my-4 bg-gradient-to-r from-brand-primary/5 to-transparent rounded-r-lg">
+                      <div className="text-neutral-300 italic text-sm flex items-start">
+                        <span className="text-brand-primary mr-2 text-lg">💡</span>
+                        <div>{children}</div>
+                      </div>
+                    </blockquote>
+                  ),
+                  
+                  // Links interativos
+                  a: ({href, children}) => (
+                    <a 
+                      href={href} 
+                      className="text-brand-primary hover:text-white underline decoration-brand-primary decoration-2 underline-offset-2 hover:decoration-white transition-all duration-200 hover:bg-brand-primary/10 px-1 py-0.5 rounded"
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                    >
+                      {children}
+                      <span className="ml-1 text-xs">↗</span>
+                    </a>
+                  ),
+                  
+                  // Divisores horizontais
+                  hr: () => (
+                    <hr className="my-6 border-0 h-px bg-gradient-to-r from-transparent via-neutral-600 to-transparent" />
+                  ),
+                  
+                  // Tabelas (se necessário)
+                  table: ({children}) => (
+                    <div className="overflow-x-auto mb-4 rounded-lg border border-neutral-800">
+                      <table className="w-full text-sm">
+                        {children}
+                      </table>
+                    </div>
+                  ),
+                  
+                  thead: ({children}) => (
+                    <thead className="bg-neutral-900 text-neutral-300">
+                      {children}
+                    </thead>
+                  ),
+                  
+                  tbody: ({children}) => (
+                    <tbody className="bg-black/40 text-neutral-100">
+                      {children}
+                    </tbody>
+                  ),
+                  
+                  tr: ({children}) => (
+                    <tr className="border-b border-neutral-800 hover:bg-neutral-900/30 transition-colors">
+                      {children}
+                    </tr>
+                  ),
+                  
+                  td: ({children}) => (
+                    <td className="px-4 py-2 text-sm">
+                      {children}
+                    </td>
+                  ),
+                  
+                  th: ({children}) => (
+                    <th className="px-4 py-3 text-left font-medium">
+                      {children}
+                    </th>
+                  )
+                }}
+              >
+                {content}
+              </ReactMarkdown>
+            </div>
+          )
+        } else {
+          // Para mensagens do usuário, renderizar como texto simples
+          return content.split('\n').map((line, index) => (
+            <span key={index}>
+              {line}
+              {index < content.split('\n').length - 1 && <br />}
+            </span>
+          ))
+        }
       } catch (error) {
         console.error('Error formatting message:', error)
         return <span className="text-rose-500">Erro ao formatar mensagem</span>
       }
-    }, [message.content])
+    }, [message.content, message.role])
 
     return (
       <div
@@ -426,7 +700,7 @@ export default function Dashboard() {
               : 'bg-neutral-900 text-white rounded-2xl rounded-tl-sm border border-neutral-800 shadow-lg'
           } transition-all duration-300 hover:shadow-xl`}
         >
-          <div className="text-sm whitespace-pre-wrap">
+          <div className="text-sm">
             {formattedContent}
           </div>
           <div className="mt-2 pt-2 border-t border-neutral-800/30 text-xs text-neutral-500 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -571,6 +845,11 @@ export default function Dashboard() {
       if (userResponse.length > 200) understanding = 'good'
       if (userResponse.length > 400) understanding = 'excellent'
       if (userResponse.length < 50) understanding = 'poor'
+
+      // Obter posição atual da lição
+      const progress = currentProfile.currentProgress
+      const currentModule = progress?.currentModule || 1
+      const currentLesson = progress?.currentLesson || 1
       
       const response = await fetch('/api/learning-profile/mark-completed', {
         method: 'POST',
@@ -578,24 +857,35 @@ export default function Dashboard() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ understanding })
+        body: JSON.stringify({ 
+          module: currentModule,
+          lesson: currentLesson,
+          understanding 
+        })
       })
 
       if (response.ok) {
+        const result = await response.json()
+        
+        // Atualizar contexto local com os dados retornados
+        if (result.context) {
+          setLessonContext(result.context)
+          
+          // Atualizar perfil com progresso atualizado
+          const updatedProfile = {
+            ...currentProfile,
+            currentProgress: result.context
+          }
+          setCurrentProfile(updatedProfile)
+        }
+        
         const aiMessage: Message = {
           id: Date.now().toString(),
           role: 'assistant',
-          content: `🎉 **Parabéns!** Você concluiu esta lição com sucesso!\n\n✅ **Compreensão avaliada:** ${understanding === 'excellent' ? 'Excelente' : understanding === 'good' ? 'Boa' : understanding === 'fair' ? 'Satisfatória' : 'Precisa melhorar'}\n\n🚀 **Próximo passo:** Quando estiver pronto, clique em "Próxima Lição" para continuar sua jornada de aprendizado!`,
+          content: `🎉 **Parabéns!** Você concluiu esta lição com sucesso!\n\n✅ **Compreensão avaliada:** ${understanding === 'excellent' ? 'Excelente' : understanding === 'good' ? 'Boa' : understanding === 'fair' ? 'Satisfatória' : 'Precisa melhorar'}\n\n🏆 **XP Ganho:** +10 XP\n\n🚀 **Próximo passo:** Quando estiver pronto, clique em "Próxima Lição" para continuar sua jornada de aprendizado!`,
           timestamp: new Date()
         }
         setMessages(prev => [...prev, aiMessage])
-        
-        // Atualizar o progresso local
-        setCurrentProgress((prev: any) => ({
-          ...prev,
-          lessonCompleted: true,
-          userUnderstanding: understanding
-        }))
       } else {
         const errorData = await response.json()
         console.error('Error marking lesson completed:', errorData)
@@ -634,6 +924,18 @@ export default function Dashboard() {
           }
           setMessages(prev => [...prev, aiMessage])
         } else {
+          // Atualizar contexto local com os dados retornados
+          if (data.context) {
+            setLessonContext(data.context)
+            
+            // Atualizar perfil com progresso atualizado
+            const updatedProfile = {
+              ...currentProfile,
+              currentProgress: data.context
+            }
+            setCurrentProfile(updatedProfile)
+          }
+          
           // Carregar nova lição
           await initializeWithCurrentLesson()
           
@@ -656,18 +958,29 @@ export default function Dashboard() {
     }
   }
 
+  // Função para alternar expansão de módulos
+  const toggleModuleExpansion = useCallback((moduleIndex: number) => {
+    setExpandedModules(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(moduleIndex)) {
+        newSet.delete(moduleIndex)
+      } else {
+        newSet.add(moduleIndex)
+      }
+      return newSet
+    })
+  }, [])
+
   // Sistema de monitoramento proativo do código
   const [previousCode, setPreviousCode] = useState<string>('')
   const [codeMonitoringEnabled, setCodeMonitoringEnabled] = useState(false)
 
   const startCodeMonitoring = useCallback(() => {
     setCodeMonitoringEnabled(true)
-    console.log('Monitoramento de código iniciado')
   }, [])
 
   const stopCodeMonitoring = useCallback(() => {
     setCodeMonitoringEnabled(false)
-    console.log('Monitoramento de código pausado')
   }, [])
 
   // Monitorar mudanças no código em tempo real
@@ -755,29 +1068,31 @@ export default function Dashboard() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex px-3 pt-3 pb-1 bg-neutral-900">
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`flex-1 px-3 py-2 text-sm font-medium flex items-center justify-center space-x-2 transition-all rounded-t-lg ${
-              activeTab === 'chat' 
-                ? 'bg-black text-brand-primary shadow-lg shadow-brand-primary/5 border-t border-x border-neutral-800' 
-                : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
-            }`}
-          >
-            <MessageCircle className={`w-4 h-4 ${activeTab === 'chat' ? 'text-brand-primary' : 'text-neutral-400'}`} />
-            <span>Chat</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('plan')}
-            className={`flex-1 px-3 py-2 text-sm font-medium flex items-center justify-center space-x-2 transition-all rounded-t-lg ${
-              activeTab === 'plan' 
-                ? 'bg-black text-brand-primary shadow-lg shadow-brand-primary/5 border-t border-x border-neutral-800' 
-                : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
-            }`}
-          >
-            <Target className={`w-4 h-4 ${activeTab === 'plan' ? 'text-brand-primary' : 'text-neutral-400'}`} />
-            <span>Plano</span>
-          </button>
+        <div className="px-4 pt-4 pb-2 bg-neutral-900/50 backdrop-blur-sm">
+          <div className="bg-neutral-800/40 rounded-xl p-1 flex gap-1">
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`flex-1 px-4 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
+                activeTab === 'chat' 
+                  ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' 
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-700/50'
+              }`}
+            >
+              <MessageCircle className={`w-4 h-4 ${activeTab === 'chat' ? 'text-white' : 'text-neutral-400'}`} />
+              <span>Chat</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('plan')}
+              className={`flex-1 px-4 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
+                activeTab === 'plan' 
+                  ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' 
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-700/50'
+              }`}
+            >
+              <Target className={`w-4 h-4 ${activeTab === 'plan' ? 'text-white' : 'text-neutral-400'}`} />
+              <span>Plano</span>
+            </button>
+          </div>
         </div>
 
         {/* Tab Content */}
@@ -889,32 +1204,36 @@ export default function Dashboard() {
                     <div className="space-y-5">
                       <div className="flex flex-col p-3 bg-black/40 rounded-lg border border-neutral-800">
                         <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Módulo Atual</p>
-                        <p className="font-medium text-white">{studyPlan.currentModuleName}</p>
+                        <p className="font-medium text-white">
+                          {lessonContext?.moduleName || 'Carregando...'}
+                        </p>
                       </div>
                       <div className="flex flex-col p-3 bg-black/40 rounded-lg border border-neutral-800">
                         <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Lição</p>
-                        <p className="font-medium text-white">{studyPlan.currentLessonName}</p>
+                        <p className="font-medium text-white">
+                          {lessonContext?.lessonName || 'Carregando...'}
+                        </p>
                       </div>
                       <div>
                         <div className="flex justify-between items-center mb-2">
                           <p className="text-xs uppercase tracking-wider text-neutral-500">Progresso Total</p>
                           <span className="text-sm font-medium text-white">
-                            {Math.round(((currentProgress?.completedLessons || 0) / (studyPlan.totalLessons || 1)) * 100)}%
+                            {correctProgress?.progressPercentage || lessonContext?.progressPercentage || 0}%
                           </span>
                         </div>
-                        <div className="mt-1 bg-black h-2 rounded-full overflow-hidden">
+                        <div className="mt-1 bg-neutral-800 h-2 rounded-full overflow-hidden">
                           <div 
-                            className="bg-gradient-to-r from-brand-primary to-brand-primary-dark h-2 rounded-full transition-all duration-700 ease-out"
-                            style={{ width: `${((currentProgress?.completedLessons || 0) / (studyPlan.totalLessons || 1)) * 100}%` }}
+                            className="bg-amber-400 h-2 rounded-full transition-all duration-700 ease-out"
+                            style={{ width: `${correctProgress?.progressPercentage || lessonContext?.progressPercentage || 38}%` }}
                           />
                         </div>
                         <div className="flex justify-between mt-2">
                           <p className="text-xs text-neutral-500">
-                            <span className="font-semibold text-white">{currentProgress?.completedLessons || 0}</span> de {studyPlan.totalLessons} lições
+                            <span className="font-semibold text-white">{correctProgress?.totalCompletedLessons || lessonContext?.completedLessons || 0}</span> de {correctProgress?.totalLessons || lessonContext?.totalLessons || 0} lições
                           </p>
                           <div className="flex items-center text-xs">
                             <Zap className="w-3 h-3 text-amber-400 mr-1" />
-                            <span className="text-amber-400">+{Math.round(((currentProgress?.completedLessons || 0) / (studyPlan.totalLessons || 1)) * 1000)} XP</span>
+                            <span className="text-amber-400">+{(lessonContext?.xpEarned || 0)} XP</span>
                           </div>
                         </div>
                       </div>
@@ -930,26 +1249,144 @@ export default function Dashboard() {
                       Plano de Estudos
                     </h3>
                     <div className="space-y-3">
-                      {studyPlan.modules?.map((module: any, index: number) => (
-                        <div key={index} className="p-4 bg-black/40 rounded-xl border border-neutral-800 hover:border-neutral-700 transition-all hover:shadow-lg group cursor-pointer">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-medium text-white group-hover:text-brand-primary transition-colors flex items-center">
-                              <Circle className="w-3 h-3 mr-2 text-brand-primary opacity-0 group-hover:opacity-100 transition-opacity" />
-                              {module.name}
-                            </h4>
-                            <span className="text-xs py-0.5 px-2 bg-neutral-800 rounded-full text-neutral-400 group-hover:bg-brand-primary/20 group-hover:text-brand-primary transition-colors">
-                              {module.lessons?.length || 0} lições
-                            </span>
+                      {studyPlan.modules?.map((module: any, moduleIndex: number) => {
+                        const isExpanded = expandedModules.has(moduleIndex)
+                        
+                        // Usar os dados pré-calculados do correctProgress ao invés de calcular manualmente
+                        const moduleProgressData = correctProgress?.moduleProgress?.[moduleIndex] || {
+                          completedLessons: 0,
+                          totalLessons: module.lessons?.length || 0,
+                          isCompleted: false
+                        }
+                        
+                        // Use lessonContext as primary source, fallback to currentProfile
+                        const currentModuleNum = lessonContext?.currentModule || currentProfile?.currentProgress?.currentModule || 1
+                        const currentLessonNum = lessonContext?.currentLesson || currentProfile?.currentProgress?.currentLesson || 1
+                        const completedLessonsArray = currentProfile?.currentProgress?.completedLessons || []
+                        
+                        // Usar dados do correctProgress (dados já corrigidos e calculados)
+                        const completedLessonsCount = moduleProgressData.completedLessons
+                        const totalLessons = moduleProgressData.totalLessons
+                        const progressPercentage = totalLessons > 0 ? (completedLessonsCount / totalLessons) * 100 : 0
+                        
+                        return (
+                          <div key={moduleIndex} className="bg-black/40 rounded-xl border border-neutral-800 hover:border-neutral-700 transition-all hover:shadow-lg overflow-hidden">
+                            <div className="p-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-medium text-white flex items-center">
+                                  {moduleProgressData.isCompleted ? (
+                                    <div className="w-3 h-3 mr-2 bg-green-500 rounded-full flex items-center justify-center">
+                                      <span className="text-white text-xs font-bold">✓</span>
+                                    </div>
+                                  ) : (
+                                    <Circle className="w-3 h-3 mr-2 text-brand-primary" />
+                                  )}
+                                  {module.name}
+                                </h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs py-0.5 px-2 bg-neutral-800 rounded-full text-neutral-400">
+                                    {completedLessonsCount}/{totalLessons} concluídas
+                                  </span>
+                                  <button 
+                                    onClick={() => toggleModuleExpansion(moduleIndex)}
+                                    className="text-xs text-brand-primary transition-all flex items-center hover:text-brand-primary-light"
+                                  >
+                                    Ver detalhes
+                                    <ChevronRight className={`w-3 h-3 ml-1 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="text-sm text-neutral-400 mt-2">{module.description}</p>
+                              
+                              {/* Progress bar */}
+                              <div className="mt-3">
+                                <div className="w-full bg-neutral-800 rounded-full h-2">
+                                  <div 
+                                    className={`h-2 rounded-full transition-all duration-300 ${
+                                      moduleProgressData.isCompleted 
+                                        ? 'bg-green-500' 
+                                        : 'bg-amber-400'
+                                    }`}
+                                    style={{ width: `${progressPercentage}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Expanded lessons list */}
+                            {isExpanded && module.lessons && (
+                              <div className="border-t border-neutral-800 bg-neutral-900/50">
+                                <div className="p-4">
+                                  <h5 className="text-sm font-medium text-neutral-300 mb-3">Lições do módulo:</h5>
+                                  <div className="space-y-2">
+                                    {module.lessons.map((lesson: any, lessonIndex: number) => {
+                                      const lessonKey = `${moduleIndex}-${lessonIndex}`
+                                      
+                                      // Verificar se a lição está completada
+                                      let isCompleted = false
+                                      if (moduleIndex + 1 < currentModuleNum) {
+                                        // Módulo anterior: todas as lições completadas
+                                        isCompleted = true
+                                      } else if (moduleIndex + 1 === currentModuleNum) {
+                                        // Módulo atual: apenas lições anteriores à atual
+                                        isCompleted = lessonIndex + 1 < currentLessonNum
+                                      }
+                                      
+                                      // Verificar se é a lição atual
+                                      const isCurrent = (moduleIndex + 1) === currentModuleNum && (lessonIndex + 1) === currentLessonNum
+                                      
+                                      return (
+                                        <div 
+                                          key={lessonIndex}
+                                          className={`flex items-center justify-between p-3 rounded-lg transition-colors ${
+                                            isCurrent 
+                                              ? 'bg-brand-primary/20 border border-brand-primary/30' 
+                                              : isCompleted 
+                                                ? 'bg-green-500/10 border border-green-500/20'
+                                                : 'bg-neutral-800/50 border border-neutral-700'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-3">
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                                              isCompleted 
+                                                ? 'bg-green-500 text-white'
+                                                : isCurrent
+                                                  ? 'bg-brand-primary text-white'
+                                                  : 'bg-neutral-600 text-neutral-300'
+                                            }`}>
+                                              {isCompleted ? '✓' : lessonIndex + 1}
+                                            </div>
+                                            <div>
+                                              <h6 className="font-medium text-sm text-white">
+                                                {lesson.title || lesson.name || `Lição ${lessonIndex + 1}`}
+                                              </h6>
+                                              <p className="text-xs text-neutral-400">
+                                                {lesson.description || lesson.content || `Lição ${lessonIndex + 1} do módulo ${module.name || `Módulo ${moduleIndex + 1}`}`}
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            {isCurrent && (
+                                              <span className="text-xs bg-brand-primary text-white px-2 py-1 rounded-full">
+                                                Atual
+                                              </span>
+                                            )}
+                                            {isCompleted && (
+                                              <span className="text-xs bg-green-500 text-white px-2 py-1 rounded-full">
+                                                Concluída
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <p className="text-sm text-neutral-400 mt-2 group-hover:text-neutral-300 transition-colors">{module.description}</p>
-                          <div className="mt-3 pt-3 border-t border-neutral-800 flex justify-end">
-                            <button className="text-xs text-brand-primary opacity-0 group-hover:opacity-100 transition-all flex items-center">
-                              Ver detalhes
-                              <ChevronRight className="w-3 h-3 ml-1" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -988,6 +1425,13 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex space-x-1">
+              <button
+                onClick={() => router.push('/profile')}
+                className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                title="Meu Perfil"
+              >
+                <User className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => router.push('/help')}
                 className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
