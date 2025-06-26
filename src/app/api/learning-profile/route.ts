@@ -101,6 +101,10 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const userId = getUserFromToken(request)
+    
+    // Primeiro, tentar buscar contexto atual completo
+    const currentContext = await getUserCurrentContext(userId)
+    
     // Buscar todos os perfis de linguagem do usuário
     const profiles = await prisma.learningProfile.findMany({
       where: { userId },
@@ -108,7 +112,10 @@ export async function GET(request: NextRequest) {
     })
 
     if (!profiles || profiles.length === 0) {
-      return NextResponse.json({ profiles: [] })
+      return NextResponse.json({ 
+        profiles: [],
+        currentContext: null 
+      })
     }
 
     // Montar progresso detalhado para cada perfil
@@ -146,7 +153,10 @@ export async function GET(request: NextRequest) {
       }
     }))
 
-    return NextResponse.json(result)
+    return NextResponse.json({ 
+      profiles: result,
+      currentContext
+    })
   } catch (error) {
     console.error('❌ [LEARNING-PROFILE-API] Error:', error)
     return NextResponse.json(

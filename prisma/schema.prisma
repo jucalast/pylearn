@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,115 +8,159 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relationships
-  learningProfiles LearningProfile[]
+  id               String            @id @default(cuid())
+  email            String            @unique
+  name             String
+  password         String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  lastStudyDate    DateTime?
+  level            Int               @default(1)
+  streak           Int               @default(0)
+  totalXP          Int               @default(0)
   chatSessions     ChatSession[]
   codeSubmissions  CodeSubmission[]
+  learningProfiles LearningProfile[]
+  studySessions    StudySession[]
+  achievements     UserAchievement[]
 
   @@map("users")
 }
 
 model LearningProfile {
-  id                String   @id @default(cuid())
-  userId            String
-  language          String   // Programming language
-  knowledgeLevel    String   // beginner, intermediate, advanced
-  studyPlan         Json     // JSON object with study plan structure
-  currentProgress   Json     // JSON object tracking progress
-  preferences       Json?    // Learning preferences
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  // Relationships
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String   @id @default(cuid())
+  userId             String
+  language           String
+  knowledgeLevel     String
+  studyPlan          Json
+  currentProgress    Json
+  preferences        Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  lessonsCompleted   Int      @default(0)
+  progressPercentage Float    @default(0)
+  totalLessons       Int      @default(0)
+  xp                 Int      @default(0)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("learning_profiles")
 }
 
 model ChatSession {
-  id        String   @id @default(cuid())
+  id        String        @id @default(cuid())
   userId    String
   title     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relationships
-  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages ChatMessage[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("chat_sessions")
 }
 
 model ChatMessage {
-  id            String   @id @default(cuid())
-  sessionId     String
-  role          String   // user, assistant, system
-  content       String
-  metadata      Json?    // Additional metadata like code examples, exercises
-  createdAt     DateTime @default(now())
-
-  // Relationships
-  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id        String      @id @default(cuid())
+  sessionId String
+  role      String
+  content   String
+  metadata  Json?
+  createdAt DateTime    @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("chat_messages")
 }
 
 model Exercise {
-  id          String   @id @default(cuid())
-  language    String   // Programming language
-  level       String   // beginner, intermediate, advanced
-  title       String
-  description String
+  id           String           @id @default(cuid())
+  language     String
+  level        String
+  title        String
+  description  String
   codeTemplate String?
-  solution    String
-  testCases   Json     // JSON array with test cases
-  hints       Json?    // JSON array with hints
-  metadata    Json?    // Additional metadata
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relationships
-  submissions CodeSubmission[]
+  solution     String
+  testCases    Json
+  hints        Json?
+  metadata     Json?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  submissions  CodeSubmission[]
 
   @@map("exercises")
 }
 
 model CodeSubmission {
-  id          String   @id @default(cuid())
-  userId      String
-  exerciseId  String
-  code        String
-  isCorrect   Boolean
-  feedback    String?
-  score       Float?
-  timeSpent   Int?     // Time spent in seconds
-  attempts    Int      @default(1)
-  createdAt   DateTime @default(now())
-
-  // Relationships
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  userId     String
+  exerciseId String
+  code       String
+  isCorrect  Boolean
+  feedback   String?
+  score      Float?
+  timeSpent  Int?
+  attempts   Int      @default(1)
+  createdAt  DateTime @default(now())
+  exercise   Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("code_submissions")
 }
 
 model LearningPath {
-  id          String   @id @default(cuid())
-  language    String   // Programming language
-  level       String   // beginner, intermediate, advanced
-  title       String
-  description String
-  modules     Json     // JSON array with learning modules
+  id             String   @id @default(cuid())
+  language       String
+  level          String
+  title          String
+  description    String
+  modules        Json
   estimatedHours Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@map("learning_paths")
+}
+
+model StudySession {
+  id                 String    @id @default(cuid())
+  userId             String
+  language           String
+  duration           Int
+  xpEarned           Int       @default(0)
+  lessonsCompleted   Int       @default(0)
+  exercisesCompleted Int       @default(0)
+  createdAt          DateTime  @default(now())
+  endTime            DateTime?
+  isActive           Boolean   @default(true)
+  startTime          DateTime
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("study_sessions")
+}
+
+model Achievement {
+  id               String            @id @default(cuid())
+  description      String
+  icon             String
+  category         String
+  createdAt        DateTime          @default(now())
+  condition        Json
+  isActive         Boolean           @default(true)
+  key              String            @unique
+  name             String
+  xpReward         Int               @default(0)
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  progress      Int         @default(100)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
 }
