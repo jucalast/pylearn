@@ -24,7 +24,12 @@ import {
   CheckCircle,
   Circle,
   ChevronRight,
-  Zap
+  Zap,
+  TrendingUp,
+  Star,
+  Calendar,
+  Timer,
+  Trophy
 } from 'lucide-react'
 
 interface Message {
@@ -57,9 +62,18 @@ export default function Dashboard() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'chat' | 'exercise' | 'plan'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'exercise' | 'plan' | 'stats'>('chat')
   const [chatWidth, setChatWidth] = useState(288) // 72 * 4 = 288px (w-72)
   const [isResizing, setIsResizing] = useState(false)
+  
+  // Gamification States
+  const [userStats, setUserStats] = useState<any>(null)
+  const [achievements, setAchievements] = useState<any[]>([])
+  const [recentAchievements, setRecentAchievements] = useState<any[]>([])
+  const [studySessions, setStudySessions] = useState<any[]>([])
+  const [weeklyXP, setWeeklyXP] = useState<number[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
@@ -96,10 +110,16 @@ export default function Dashboard() {
 
       if (response.ok) {
         const data = await response.json()
+        console.log('📊 [DASHBOARD] Learning profile response:', data)
         
         if (data.currentContext) {
           // Usar contexto atualizado da API
           const { profile, progress, context, studyPlan } = data.currentContext
+          console.log('✅ [DASHBOARD] Using currentContext:', { 
+            hasProfile: !!profile, 
+            hasStudyPlan: !!studyPlan, 
+            modulesCount: studyPlan?.modules?.length 
+          })
           setCurrentProfile(profile)
           setStudyPlan(studyPlan)
           setLessonContext({
@@ -112,17 +132,141 @@ export default function Dashboard() {
         } else if (data.profiles?.length > 0) {
           // Fallback para formato antigo
           const profile = data.profiles[0]
+          console.log('📦 [DASHBOARD] Using profiles fallback:', { 
+            hasProfile: !!profile, 
+            hasStudyPlan: !!profile.studyPlan, 
+            modulesCount: profile.studyPlan?.modules?.length 
+          })
           setCurrentProfile(profile)
           setStudyPlan(profile.studyPlan)
           setLessonContext(profile.currentProgress)
+        } else {
+          console.log('❌ [DASHBOARD] No profiles or currentContext found')
         }
+      } else {
+        console.error('❌ [DASHBOARD] API response not ok:', response.status)
       }
     } catch (error) {
-      console.error('Error fetching updated profile:', error)
+      console.error('❌ [DASHBOARD] Error fetching updated profile:', error)
     }
+    
+    // Fetch gamification data after loading profile
+    await fetchGamificationData()
+    
+    // Start a study session when dashboard loads
+    await startStudySession()
     
     // Inicializar lição após carregar dados
     initializeWithCurrentLesson()
+  }
+
+  // Fetch all gamification data
+  const fetchGamificationData = async () => {
+    const token = localStorage.getItem('token')
+    
+    try {
+      // Fetch user stats
+      const statsResponse = await fetch('/api/user-stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json()
+        setUserStats(statsData)
+        
+        // Extract data for components
+        setWeeklyXP(statsData.weeklyXP || Array(7).fill(0))
+        setRecentAchievements(statsData.achievements?.slice(0, 3) || [])
+        setStudySessions(statsData.recentSessions || [])
+      }
+    } catch (error) {
+      console.error('❌ [GAMIFICATION] Failed to fetch data:', error)
+    }
+  }
+
+  // Start a new study session
+  const startStudySession = async () => {
+    const token = localStorage.getItem('token')
+    
+    try {
+      const response = await fetch('/api/study-sessions/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          language: currentProfile?.language || 'Python'
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setCurrentSessionId(data.sessionId)
+        setSessionStartTime(new Date(data.startTime))
+        console.log('🎯 [SESSION] Started new study session:', data.sessionId)
+      }
+    } catch (error) {
+      console.error('❌ [SESSION] Failed to start session:', error)
+    }
+  }
+
+  // Update active study session
+  const updateStudySession = async (xpEarned = 0, lessonsCompleted = 0) => {
+    if (!currentSessionId) return
+
+    const token = localStorage.getItem('token')
+    
+    try {
+      await fetch('/api/study-sessions/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          sessionId: currentSessionId,
+          xpEarned,
+          lessonsCompleted
+        })
+      })
+    } catch (error) {
+      console.error('❌ [SESSION] Failed to update session:', error)
+    }
+  }
+
+  // End current study session
+  const endStudySession = async () => {
+    if (!currentSessionId) return
+
+    const token = localStorage.getItem('token')
+    
+    try {
+      const response = await fetch('/api/study-sessions/end', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          sessionId: currentSessionId
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('🏁 [SESSION] Ended study session:', {
+          duration: Math.round(data.session.duration / 60) + ' minutes',
+          xpEarned: data.session.xpEarned
+        })
+        setCurrentSessionId(null)
+        setSessionStartTime(null)
+        
+        // Refresh gamification data
+        await fetchGamificationData()
+      }
+    } catch (error) {
+      console.error('❌ [SESSION] Failed to end session:', error)
+    }
   }
 
   useEffect(() => {
@@ -177,6 +321,29 @@ export default function Dashboard() {
       window.removeEventListener('touchcancel', stopResize)
     }
   }, [isResizing, resize, stopResize])
+
+  // Cleanup session when leaving dashboard
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (currentSessionId) {
+        // Use sendBeacon for more reliable cleanup on page unload
+        const token = localStorage.getItem('token')
+        navigator.sendBeacon('/api/study-sessions/end', JSON.stringify({
+          sessionId: currentSessionId
+        }))
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      // End session when component unmounts
+      if (currentSessionId) {
+        endStudySession()
+      }
+    }
+  }, [currentSessionId])
 
   // Calcular progresso correto baseado no studyPlan atual
   const correctProgress = useMemo(() => {
@@ -262,12 +429,42 @@ export default function Dashboard() {
         const errorData = await response.json()
         console.error('Proactive teaching error:', errorData)
         
-        // Se o erro é por plano de estudos inválido ou perfil não encontrado, redirecionar para onboarding
-        if (errorData.error && (
+        // Handle authentication and profile errors
+        if (errorData.type === 'user_not_found' || response.status === 401) {
+          const errorMessage: Message = {
+            id: generateUniqueId(),
+            role: 'assistant',
+            content: `🔐 **Token Inválido:** Sua sessão expirou ou é inválida.\n\n🔄 **Solução:** Faça login novamente para continuar.`,
+            timestamp: new Date()
+          }
+          setMessages([errorMessage])
+          
+          // Clear invalid token and redirect to login
+          localStorage.removeItem('token')
+          localStorage.removeItem('user')
+          
+          setTimeout(() => {
+            router.push('/auth/login')
+          }, 3000)
+          
+        } else if (errorData.type === 'profile_not_found') {
+          const errorMessage: Message = {
+            id: generateUniqueId(),
+            role: 'assistant',
+            content: `❌ **Configuração Necessária:** Seu perfil de aprendizado não foi encontrado ou está inválido.\n\n🔧 **Solução:** Vou te redirecionar para completar sua configuração inicial.`,
+            timestamp: new Date()
+          }
+          setMessages([errorMessage])
+          
+          // Redirecionar para onboarding após 3 segundos
+          setTimeout(() => {
+            router.push('/onboarding')
+          }, 3000)
+          
+        } else if (errorData.error && (
           errorData.error.includes('Plano de estudos inválido') || 
           errorData.error.includes('Learning profile not found') ||
-          errorData.error.includes('Perfil de aprendizado não encontrado') ||
-          errorData.type === 'profile_not_found'
+          errorData.error.includes('Perfil de aprendizado não encontrado')
         )) {
           const errorMessage: Message = {
             id: generateUniqueId(),
@@ -846,10 +1043,34 @@ export default function Dashboard() {
       if (userResponse.length > 400) understanding = 'excellent'
       if (userResponse.length < 50) understanding = 'poor'
 
-      // Obter posição atual da lição
+      // Obter posição atual da lição baseada no contexto correto
       const progress = currentProfile.currentProgress
-      const currentModule = progress?.currentModule || 1
-      const currentLesson = progress?.currentLesson || 1
+      
+      // Prioridade: lessonContext (mais confiável) > currentProgress > valores padrão
+      let currentModule = lessonContext?.currentModule || progress?.currentModule || 1
+      let currentLesson = lessonContext?.currentLesson || progress?.currentLesson || 1
+      
+      // Verificação adicional: se não há contexto de lição, buscar do progress atualizado
+      if (!lessonContext && progress) {
+        currentModule = progress.currentModule || 1
+        currentLesson = progress.currentLesson || 1
+      }
+      
+      console.log('🎯 [MARK-COMPLETED] Attempting to complete lesson:', {
+        module: currentModule,
+        lesson: currentLesson,
+        understanding,
+        lessonContext: lessonContext ? {
+          currentModule: lessonContext.currentModule,
+          currentLesson: lessonContext.currentLesson,
+          lessonName: lessonContext.lessonName,
+          moduleName: lessonContext.moduleName
+        } : 'null',
+        progressContext: progress ? {
+          currentModule: progress.currentModule,
+          currentLesson: progress.currentLesson
+        } : 'null'
+      })
       
       const response = await fetch('/api/learning-profile/mark-completed', {
         method: 'POST',
@@ -867,6 +1088,18 @@ export default function Dashboard() {
       if (response.ok) {
         const result = await response.json()
         
+        // Verificar se a lição já estava concluída
+        if (result.alreadyCompleted) {
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `ℹ️ **Esta lição já foi concluída!**\n\nParece que você já completou esta lição anteriormente. Não se preocupe, seu progresso já foi registrado!\n\n💡 **Dica:** Clique em "Próxima Lição" para continuar com o próximo conteúdo, ou use o chat para tirar dúvidas sobre o material atual.\n\n📚 Você pode revisar o conteúdo quantas vezes quiser para reforçar seu aprendizado!`,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          return
+        }
+        
         // Atualizar contexto local com os dados retornados
         if (result.context) {
           setLessonContext(result.context)
@@ -879,13 +1112,34 @@ export default function Dashboard() {
           setCurrentProfile(updatedProfile)
         }
         
-        const aiMessage: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: `🎉 **Parabéns!** Você concluiu esta lição com sucesso!\n\n✅ **Compreensão avaliada:** ${understanding === 'excellent' ? 'Excelente' : understanding === 'good' ? 'Boa' : understanding === 'fair' ? 'Satisfatória' : 'Precisa melhorar'}\n\n🏆 **XP Ganho:** +10 XP\n\n🚀 **Próximo passo:** Quando estiver pronto, clique em "Próxima Lição" para continuar sua jornada de aprendizado!`,
-          timestamp: new Date()
+        // Refresh gamification data after lesson completion
+        await fetchGamificationData()
+        
+        // Update study session with lesson completion
+        await updateStudySession(result.gamification?.xpEarned || 15, 1)
+        
+        // Check for new achievements
+        if (result.gamification?.newAchievements && result.gamification.newAchievements.length > 0) {
+          const achievementText = result.gamification.newAchievements
+            .map((a: any) => `🏆 **${a.name}**: ${a.description}`)
+            .join('\n\n')
+          
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `🎉 **Parabéns!** Você concluiu esta lição com sucesso!\n\n✅ **Compreensão avaliada:** ${understanding === 'excellent' ? 'Excelente' : understanding === 'good' ? 'Boa' : understanding === 'fair' ? 'Satisfatória' : 'Precisa melhorar'}\n\n🏆 **XP Ganho:** +${result.gamification?.xpEarned || 15} XP\n\n${result.gamification?.leveledUp ? `🎊 **LEVEL UP!** Você agora é nível ${result.gamification.level}!\n\n` : ''}🎊 **Novas Conquistas Desbloqueadas!**\n\n${achievementText}\n\n🚀 **Próximo passo:** Quando estiver pronto, clique em "Próxima Lição" para continuar sua jornada de aprendizado!`,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiMessage])
+        } else {
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `🎉 **Parabéns!** Você concluiu esta lição com sucesso!\n\n✅ **Compreensão avaliada:** ${understanding === 'excellent' ? 'Excelente' : understanding === 'good' ? 'Boa' : understanding === 'fair' ? 'Satisfatória' : 'Precisa melhorar'}\n\n🏆 **XP Ganho:** +${result.gamification?.xpEarned || 15} XP\n\n${result.gamification?.leveledUp ? `🎊 **LEVEL UP!** Você agora é nível ${result.gamification.level}!\n\n` : ''}🚀 **Próximo passo:** Quando estiver pronto, clique em "Próxima Lição" para continuar sua jornada de aprendizado!`,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiMessage])
         }
-        setMessages(prev => [...prev, aiMessage])
       } else {
         const errorData = await response.json()
         console.error('Error marking lesson completed:', errorData)
@@ -1072,7 +1326,7 @@ export default function Dashboard() {
           <div className="bg-neutral-800/40 rounded-xl p-1 flex gap-1">
             <button
               onClick={() => setActiveTab('chat')}
-              className={`flex-1 px-4 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
+              className={`flex-1 px-3 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
                 activeTab === 'chat' 
                   ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' 
                   : 'text-neutral-400 hover:text-white hover:bg-neutral-700/50'
@@ -1083,7 +1337,7 @@ export default function Dashboard() {
             </button>
             <button
               onClick={() => setActiveTab('plan')}
-              className={`flex-1 px-4 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
+              className={`flex-1 px-3 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
                 activeTab === 'plan' 
                   ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' 
                   : 'text-neutral-400 hover:text-white hover:bg-neutral-700/50'
@@ -1091,6 +1345,17 @@ export default function Dashboard() {
             >
               <Target className={`w-4 h-4 ${activeTab === 'plan' ? 'text-white' : 'text-neutral-400'}`} />
               <span>Plano</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('stats')}
+              className={`flex-1 px-3 py-2.5 text-sm font-medium flex items-center justify-center space-x-2 transition-all duration-200 rounded-lg ${
+                activeTab === 'stats' 
+                  ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' 
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-700/50'
+              }`}
+            >
+              <TrendingUp className={`w-4 h-4 ${activeTab === 'stats' ? 'text-white' : 'text-neutral-400'}`} />
+              <span>Stats</span>
             </button>
           </div>
         </div>
@@ -1191,6 +1456,15 @@ export default function Dashboard() {
 
           {activeTab === 'plan' && (
             <div className="flex-1 p-4 overflow-y-auto bg-black">
+              {(() => {
+                console.log('🔍 [PLAN-TAB] Rendering plan tab:', { 
+                  hasStudyPlan: !!studyPlan, 
+                  studyPlanType: typeof studyPlan,
+                  modulesCount: studyPlan?.modules?.length,
+                  studyPlan: studyPlan 
+                })
+                return null
+              })()}
               {studyPlan ? (
                 <div className="space-y-6">
                   {/* Current Progress */}
@@ -1407,21 +1681,291 @@ export default function Dashboard() {
               )}
             </div>
           )}
+
+          {activeTab === 'stats' && (
+            <div className="flex-1 p-4 overflow-y-auto bg-black">
+              <div className="space-y-6">
+                {/* XP and Level */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-lg">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                    <div className="w-8 h-8 bg-brand-primary/15 rounded-full flex items-center justify-center mr-3">
+                      <Trophy className="w-4 h-4 text-brand-primary" />
+                    </div>
+                    Nível e Experiência
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-black/40 rounded-lg p-4 border border-neutral-800">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Nível Atual</p>
+                          <p className="text-2xl font-bold text-white">{userStats?.level || 1}</p>
+                        </div>
+                        <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center">
+                          <Star className="w-6 h-6 text-white" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-4 border border-neutral-800">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Total XP</p>
+                          <p className="text-2xl font-bold text-white">{userStats?.totalXP || 0}</p>
+                        </div>
+                        <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-purple-500 rounded-xl flex items-center justify-center">
+                          <Zap className="w-6 h-6 text-white" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Level Progress */}
+                  <div className="mt-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <p className="text-xs uppercase tracking-wider text-neutral-500">Progresso para Próximo Nível</p>
+                      <span className="text-sm font-medium text-white">
+                        {userStats?.xpToNextLevel ? `${userStats.xpToNextLevel} XP restantes` : 'Max Level'}
+                      </span>
+                    </div>
+                    <div className="bg-neutral-800 h-3 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-gradient-to-r from-amber-400 to-orange-500 h-3 rounded-full transition-all duration-700 ease-out"
+                        style={{ width: `${userStats?.levelProgress || 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Study Stats */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-lg">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                    <div className="w-8 h-8 bg-brand-primary/15 rounded-full flex items-center justify-center mr-3">
+                      <Calendar className="w-4 h-4 text-brand-primary" />
+                    </div>
+                    Estatísticas de Estudo
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-black/40 rounded-lg p-4 border border-neutral-800">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Sequência Atual</p>
+                          <p className="text-2xl font-bold text-white flex items-center">
+                            {userStats?.currentStreak || 0}
+                            <span className="text-orange-400 ml-1">🔥</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-4 border border-neutral-800">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Tempo Total</p>
+                          <p className="text-2xl font-bold text-white">{Math.round((userStats?.totalStudyTime || 0) / 60)}h</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-4 border border-neutral-800">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Lições Concluídas</p>
+                          <p className="text-2xl font-bold text-white">{userStats?.completedLessons || 0}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-4 border border-neutral-800">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-neutral-500 mb-1">Média XP/Dia</p>
+                          <p className="text-2xl font-bold text-white">{Math.round((userStats?.averageXPPerDay || 0))}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Achievements */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-lg">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                    <div className="w-8 h-8 bg-brand-primary/15 rounded-full flex items-center justify-center mr-3">
+                      <Award className="w-4 h-4 text-brand-primary" />
+                    </div>
+                    Conquistas Recentes
+                  </h3>
+                  {recentAchievements.length > 0 ? (
+                    <div className="space-y-3">
+                      {recentAchievements.map((achievement: any, index: number) => (
+                        <div key={index} className="bg-black/40 rounded-lg p-4 border border-neutral-800 flex items-center gap-4">
+                          <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <Trophy className="w-6 h-6 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-medium text-white">{achievement.name}</h4>
+                            <p className="text-sm text-neutral-400">{achievement.description}</p>
+                            <p className="text-xs text-amber-400 mt-1">+{achievement.xpReward} XP</p>
+                          </div>
+                          <div className="text-xs text-neutral-500">
+                            {new Date(achievement.unlockedAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Trophy className="w-8 h-8 text-neutral-500" />
+                      </div>
+                      <p className="text-neutral-400">Nenhuma conquista desbloqueada ainda</p>
+                      <p className="text-sm text-neutral-500 mt-1">Continue estudando para desbloquear suas primeiras conquistas!</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Progress Chart */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-lg">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                    <div className="w-8 h-8 bg-brand-primary/15 rounded-full flex items-center justify-center mr-3">
+                      <TrendingUp className="w-4 h-4 text-brand-primary" />
+                    </div>
+                    Progresso Semanal
+                  </h3>
+                  <div className="flex items-center justify-between gap-2 md:gap-4">
+                    {weeklyXP.map((xp, index) => {
+                      const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+                      const hasStudied = xp > 0
+                      
+                      return (
+                        <div key={index} className="flex flex-col items-center gap-3 group">
+                          {/* Nome do dia */}
+                          <div className={`text-xs font-semibold transition-colors duration-300 ${
+                            hasStudied 
+                              ? 'text-green-400' 
+                              : 'text-neutral-500'
+                          }`}>
+                            {days[index]}
+                          </div>
+                          
+                          {/* Ícone do status */}
+                          <div className="relative">
+                            {hasStudied ? (
+                              <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-green-400 rounded-xl flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-110 hover:shadow-green-500/25 group-hover:shadow-green-500/40">
+                                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                                {/* Efeito de brilho */}
+                                <div className="absolute inset-0 bg-white opacity-20 rounded-xl animate-pulse"></div>
+                              </div>
+                            ) : (
+                              <div className="w-10 h-10 bg-neutral-700 border-2 border-neutral-600 rounded-xl flex items-center justify-center transition-all duration-300 hover:border-neutral-500 group-hover:bg-neutral-600">
+                                <svg className="w-5 h-5 text-neutral-500" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" opacity="0.3"/>
+                                  <path d="M12 4c4.41 0 8 3.59 8 8s-3.59 8-8 8-8-3.59-8-8 3.59-8 8-8m0-2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* XP ganho */}
+                          <div className="text-xs text-center min-w-[40px]">
+                            <div className={`font-bold transition-colors duration-300 ${
+                              hasStudied 
+                                ? 'text-green-400' 
+                                : 'text-neutral-500'
+                            }`}>
+                              {xp} XP
+                            </div>
+                            {hasStudied && (
+                              <div className="w-full h-1 bg-green-500/30 rounded-full mt-1 overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full animate-pulse"></div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-6 pt-4 border-t border-neutral-800">
+                    <div className="flex items-center justify-center gap-6 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 bg-gradient-to-r from-green-500 to-green-400 rounded-lg shadow-sm"></div>
+                        <span className="text-neutral-400 font-medium">Estudou</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 bg-neutral-700 border border-neutral-600 rounded-lg"></div>
+                        <span className="text-neutral-400 font-medium">Não estudou</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Sessions */}
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-lg">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                    <div className="w-8 h-8 bg-brand-primary/15 rounded-full flex items-center justify-center mr-3">
+                      <Timer className="w-4 h-4 text-brand-primary" />
+                    </div>
+                    Sessões Recentes
+                  </h3>
+                  {studySessions.length > 0 ? (
+                    <div className="space-y-3">
+                      {studySessions.map((session: any, index: number) => (
+                        <div key={index} className="bg-black/40 rounded-lg p-4 border border-neutral-800 flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-white">{session.language}</p>
+                            <p className="text-sm text-neutral-400">{Math.round(session.duration / 60)} minutos de estudo</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-amber-400">+{session.xpEarned} XP</p>
+                            <p className="text-xs text-neutral-500">
+                              {new Date(session.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Timer className="w-8 h-8 text-neutral-500" />
+                      </div>
+                      <p className="text-neutral-400">Nenhuma sessão de estudo registrada</p>
+                      <p className="text-sm text-neutral-500 mt-1">Comece a estudar para ver suas sessões aqui!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* User Info */}
         <div className="p-4 border-t border-neutral-800 bg-black/30 backdrop-blur-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-brand-primary to-brand-primary-dark rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/10">
+              <div className="w-10 h-10 bg-gradient-to-br from-brand-primary to-brand-primary-dark rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/10 relative">
                 <User className="w-5 h-5 text-white" />
+                {userStats && (
+                  <div className="absolute -top-1 -right-1 w-5 h-5 bg-amber-400 rounded-full flex items-center justify-center text-xs font-bold text-black">
+                    {userStats.level}
+                  </div>
+                )}
               </div>
               <div>
                 <p className="text-sm font-medium text-white">{user?.name}</p>
-                <div className="flex items-center">
-                  <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5"></span>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full"></span>
                   <p className="text-xs text-neutral-400">{currentProfile?.language || 'Python'} • {currentProfile?.knowledgeLevel || 'Iniciante'}</p>
+                  {userStats && (
+                    <>
+                      <span className="text-neutral-600">•</span>
+                      <span className="text-xs text-amber-400 font-medium">{userStats.totalXP} XP</span>
+                    </>
+                  )}
                 </div>
+                {userStats && userStats.currentStreak > 0 && (
+                  <div className="flex items-center mt-1">
+                    <span className="text-orange-400 text-xs mr-1">🔥</span>
+                    <span className="text-xs text-neutral-400">{userStats.currentStreak} dias de sequência</span>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex space-x-1">
@@ -1483,37 +2027,76 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <button
-            onClick={runCode}
-            disabled={loading}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center space-x-2 transition-colors shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
+          {/* Gamification Widget */}
+          <div className="hidden lg:flex items-center space-x-4">
+            {userStats && (
+              <>
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-neutral-900/80 rounded-lg border border-neutral-800">
+                  <div className="w-6 h-6 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg flex items-center justify-center">
+                    <Star className="w-3 h-3 text-white" />
+                  </div>
+                  <div className="text-xs">
+                    <p className="text-neutral-400">Nível</p>
+                    <p className="font-semibold text-white">{userStats.level}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-neutral-900/80 rounded-lg border border-neutral-800">
+                  <div className="w-6 h-6 bg-gradient-to-br from-blue-400 to-purple-500 rounded-lg flex items-center justify-center">
+                    <Zap className="w-3 h-3 text-white" />
+                  </div>
+                  <div className="text-xs">
+                    <p className="text-neutral-400">XP</p>
+                    <p className="font-semibold text-white">{userStats.totalXP}</p>
+                  </div>
+                </div>
+                
+                {userStats.currentStreak > 0 && (
+                  <div className="flex items-center space-x-2 px-3 py-1.5 bg-neutral-900/80 rounded-lg border border-neutral-800">
+                    <span className="text-orange-400">🔥</span>
+                    <div className="text-xs">
+                      <p className="text-neutral-400">Sequência</p>
+                      <p className="font-semibold text-white">{userStats.currentStreak}</p>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-            <span className="font-medium">Executar Código</span>
-          </button>
+          </div>
 
-          <div className="hidden md:flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
             <button
-              onClick={handleMarkCompleted}
+              onClick={runCode}
               disabled={loading}
-              className="px-3 py-2 bg-neutral-900 border border-neutral-700 hover:border-neutral-600 text-white rounded-lg flex items-center space-x-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center space-x-2 transition-colors shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <CheckCircle className="w-4 h-4 text-emerald-500" />
-              <span>Concluir</span>
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+              <span className="font-medium">Executar Código</span>
             </button>
-            
-            <button
-              onClick={handleNextLesson}
-              disabled={loading}
-              className="px-3 py-2 bg-brand-primary hover:bg-brand-primary-dark text-white rounded-lg flex items-center space-x-2 transition-colors shadow-lg shadow-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ChevronRight className="w-4 h-4" />
-              <span>Próxima</span>
-            </button>
+
+            <div className="hidden md:flex items-center space-x-2">
+              <button
+                onClick={handleMarkCompleted}
+                disabled={loading}
+                className="px-3 py-2 bg-neutral-900 border border-neutral-700 hover:border-neutral-600 text-white rounded-lg flex items-center space-x-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                <span>Concluir</span>
+              </button>
+              
+              <button
+                onClick={handleNextLesson}
+                disabled={loading}
+                className="px-3 py-2 bg-brand-primary hover:bg-brand-primary-dark text-white rounded-lg flex items-center space-x-2 transition-colors shadow-lg shadow-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-4 h-4" />
+                <span>Próxima</span>
+              </button>
+            </div>
           </div>
         </div>
 

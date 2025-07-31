@@ -48,13 +48,29 @@ export async function POST(request: NextRequest) {
 
     // Buscar contexto completo e atualizado do banco
     console.log('🔍 [PROACTIVE-API] Getting fresh context from database...')
+    
+    // First check if user exists at all
+    const userExists = await prisma.user.findFirst({
+      where: { id: userId }
+    })
+    
+    if (!userExists) {
+      console.error('❌ [PROACTIVE-API] User not found in database:', userId)
+      return NextResponse.json({ 
+        error: 'Usuário não encontrado. Token inválido ou expirado.',
+        type: 'user_not_found',
+        redirectTo: '/auth/login'
+      }, { status: 401 })
+    }
+    
     const userContext = await getUserCurrentContext(userId)
     
     if (!userContext) {
       console.error('❌ [PROACTIVE-API] No valid context found for user')
       return NextResponse.json({ 
-        error: 'Perfil de aprendizado não encontrado ou inválido',
-        type: 'profile_not_found'
+        error: 'Perfil de aprendizado não encontrado ou inválido. Configure seu perfil.',
+        type: 'profile_not_found',
+        redirectTo: '/onboarding'
       }, { status: 404 })
     }
 
